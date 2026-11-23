@@ -12,9 +12,10 @@ new proof.
 - Latest release: **v0.7.3**, built from `main` with all three assets: iOS IPA
   (31.0 MB), Android APK (84.0 MB, versionCode 20261160) and the macOS DMG
   (6.2 MB, self-contained web build with an app icon).
-- **The repository is private**, so anonymous GitHub release checks return 404.
-  The macOS self-update therefore reports "Update check failed (HTTP 404)" until
-  releases are readable without a session.
+- **The repository is public** (since 2026-11-23). The public tree is a clean
+  snapshot: the pre-0.7.3 history lives in the private `MoviesTv-Flix-archive`
+  repository, and the preview signing keystore is not published. Anonymous
+  release checks therefore work, which is what the macOS updater needs.
 - Last verification pass: **2026-11-22** on `main` (`0.7.2` bump) — `pnpm lint` (0),
   `pnpm typecheck` (0), `pnpm test` (**179 app suites / 1,673 tests**,
   `packages/addons` 14 / 202),
@@ -475,6 +476,7 @@ local merge of `main` into the branch, not on a device.
 | 2026-11-22 | The font gate opens after a 2 s grace period even if the font observer never settles | a blank first frame is worse than the system font. Under WKWebView the `@font-face` files arrive and `document.fonts.status` reads "loaded", yet expo-font's observer stays pending until its own 12 s timeout — measured as the macOS app's 12,356 ms first paint. The gate now opens at 2 s; late faces still apply. | `useFontGate.ts`, `AppRoot.tsx` |
 | 2026-11-22 | Home content without a hero starts below the header | the home top bar is an absolute gradient so artwork can run underneath; with no catalog data the first row was Continue Watching, whose title rendered behind the brand. The first sub-row now takes the same clearance the empty/error cards already used. | `CatalogScreen.tsx` |
 | 2026-11-22 | The packaged desktop app persists provider links locally; the browser PWA still does not | a configured add-on URL can carry a debrid key, so it is still never synchronized. But the macOS bundle is a single-user app served from loopback with its own container, not a page that can be reloaded or replayed, and without persistence a provider had to be re-entered on every launch. `apps/desktop-mac` injects `window.__MOVIESTV_DESKTOP__`; the store keys are prefixed and never enter a sync payload | `DesktopAddonSecretStore.ts`, `addonSecretRuntime.web.ts` |
+| 2026-11-23 | The public repository starts from a clean snapshot, not the development history | the history carried personal commit addresses, and a committed preview keystore would become a public signing identity; PR refs would keep the old commits reachable even after a rewrite. A snapshot removes both without touching the working archive, at the cost of public history before 0.7.3 | `MoviesTv-Flix` (public), `MoviesTv-Flix-archive` (private) |
 | 2026-11-23 | The desktop updater reads GitHub releases and installs the DMG natively | the Mac app is not a PWA: reloading a service worker can never install a new bundle. A GitHub release check plus a native download/replace/relaunch is the smallest path that needs no Sparkle dependency and no signing infrastructure. The check is unavailable, not silently "up to date", when releases are not readable — which is the current state with a private repository | `desktopUpdate.ts`, `UpdateInstaller`, `AppUpdateScreen.tsx` |
 | 2026-11-22 | Providers move between devices as a copyable setup code, never through the server | the link can embed a debrid key, and the product also avoids any debrid integration of its own so a store review is not blocked by one. A code the user copies by hand transfers the same data without a row, a log or a dependency; a passphrase-encrypted sync remains possible later but needs crypto code and a recovery story | `packages/addons/src/setupTransfer.ts`, `ProviderTransferScreen.tsx` |
 | 2026-11-22 | A configured provider link is shown in its details screen for manual transfer | sync must keep withholding the link, but regenerating it on the provider's website is the only alternative. Selectable text lets the user copy it to another device once, where it now persists | `ProviderConfigScreen.tsx` |
@@ -486,11 +488,7 @@ local merge of `main` into the branch, not on a device.
    device, but under the placeholder App ID the only available profile names. A
    profile for the real bundle id replaces 0.5.5 in place, keeps its data and
    removes the second icon; it needs the team account that owns the signing certificate.
-2. **Public update channel, or accept manual updates.** The built-in updater
-   needs a release endpoint readable without a GitHub session. Either make the
-   repository/releases public or publish the DMG plus a small manifest on public
-   storage; otherwise the check keeps reporting 404 and updates stay manual.
-3. **Automatic provider transfer (optional).** Sign-in sync brings metadata and
+2. **Automatic provider transfer (optional).** Sign-in sync brings metadata and
    progress, and a setup code now carries the links in one paste. Fully automatic
    transfer needs passphrase-encrypted sync: a crypto dependency, a recovery
    story, and a store-review note. Explicitly deferred — no debrid integration
@@ -510,6 +508,15 @@ local merge of `main` into the branch, not on a device.
    current DMG is ad-hoc signed and needs right-click → Open.
 
 ## Session log
+
+### 2026-11-23 (public repository)
+- Reviewed what publication would expose: no device UDID, account data or
+  credentials in the tree, but commit authors carried a personal hostname address
+  and `.github/keys/moviestv-preview.jks` is a signing identity.
+- Published a clean snapshot (639 files, noreply author, keystore removed) as the
+  public repository; the old history stays in `MoviesTv-Flix-archive` (private).
+- Recreated the v0.7.3 release with all three assets; anonymous API and DMG
+  download verified (HTTP 200).
 
 ### 2026-11-23 (0.7.3 and the desktop updater)
 - Settings → App updates shows the host's own version and checks GitHub releases;
