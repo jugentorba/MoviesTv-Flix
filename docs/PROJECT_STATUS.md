@@ -9,9 +9,10 @@ new proof.
 ## Snapshot
 
 - Audit date: **2026-11-22**
-- Latest release: **v0.7.3**, built from `main` with all three assets: iOS IPA
-  (31.0 MB), Android APK (84.0 MB, versionCode 20261160) and the macOS DMG
-  (6.2 MB, self-contained web build with an app icon).
+- Latest release: **v0.7.4**, built from `main` with all three assets: iOS IPA
+  (31.0 MB), Android APK (84.1 MB, versionCode 20261161) and the macOS DMG
+  (6.2 MB, self-contained). Includes email-confirmation states, password
+  recovery and the desktop self-updater.
 - **The repository is public** (since 2026-11-23). The public tree is a clean
   snapshot: the pre-0.7.3 history lives in the private `MoviesTv-Flix-archive`
   repository, and the preview signing keystore is not published. Anonymous
@@ -23,12 +24,17 @@ new proof.
   and measured: first paint **2,599–2,626 ms**, down from 12,356 ms, with the
   Home header no longer overlapping the first row (`headerBottom 46`,
   `titleTop 76`).
-- **macOS 0.7.3 — Verified now (device)**: installed at `/Applications/MoviesTv-Flix.app`,
+- **macOS self-update — Verified now (device)**: running `--install-update` with
+  the published v0.7.4 DMG downloaded it, replaced `/Applications/MoviesTv-Flix.app`
+  and relaunched; `CFBundleShortVersionString` read back as 0.7.4 afterwards.
+- **macOS 0.7.4 — Verified now (device)**: installed at `/Applications/MoviesTv-Flix.app`,
   bundles its own web export, signed in against the live backend and listed the
   four providers synced from the phone plus Continue Watching progress
   ("The Odyssey, 7% · 12 min"). First paint 2,599–2,626 ms after the font-gate
   fix. Playing a real provider stream is still untested on this build.
-- **iPhone 17 Pro Max — Verified now (device)**: 0.7.3 (build 20261160) installed
+- **iPhone 17 Pro Max — 0.7.3 (build 20261160) installed**; the 0.7.4 device install
+  was refused with `CoreDeviceError 4016` because the phone was locked/unreachable,
+  so it is pending, not failing
   over `devicectl` and launched (`MoviesTvFlix` process running) on 2026-11-22.
   It is signed with the distribution certificate in the login keychain and the
   only Ad Hoc profile available, which names `app.grape2354.valley804`; it
@@ -476,6 +482,7 @@ local merge of `main` into the branch, not on a device.
 | 2026-11-22 | The font gate opens after a 2 s grace period even if the font observer never settles | a blank first frame is worse than the system font. Under WKWebView the `@font-face` files arrive and `document.fonts.status` reads "loaded", yet expo-font's observer stays pending until its own 12 s timeout — measured as the macOS app's 12,356 ms first paint. The gate now opens at 2 s; late faces still apply. | `useFontGate.ts`, `AppRoot.tsx` |
 | 2026-11-22 | Home content without a hero starts below the header | the home top bar is an absolute gradient so artwork can run underneath; with no catalog data the first row was Continue Watching, whose title rendered behind the brand. The first sub-row now takes the same clearance the empty/error cards already used. | `CatalogScreen.tsx` |
 | 2026-11-22 | The packaged desktop app persists provider links locally; the browser PWA still does not | a configured add-on URL can carry a debrid key, so it is still never synchronized. But the macOS bundle is a single-user app served from loopback with its own container, not a page that can be reloaded or replayed, and without persistence a provider had to be re-entered on every launch. `apps/desktop-mac` injects `window.__MOVIESTV_DESKTOP__`; the store keys are prefixed and never enter a sync payload | `DesktopAddonSecretStore.ts`, `addonSecretRuntime.web.ts` |
+| 2026-11-23 | Account recovery is implemented in the client, not delegated to a hosted page | a hosted reset page would leave the app after the email round trip and would need the browser to hand control back. Reading the link in-app keeps the flow on the same screen on web and native, and the client already had to handle a sign-up that returns no session | `useAuthSession.ts`, `recoveryLink.ts`, `AccountScreen.tsx` |
 | 2026-11-23 | The public repository starts from a clean snapshot, not the development history | the history carried personal commit addresses, and a committed preview keystore would become a public signing identity; PR refs would keep the old commits reachable even after a rewrite. A snapshot removes both without touching the working archive, at the cost of public history before 0.7.3 | `MoviesTv-Flix` (public), `MoviesTv-Flix-archive` (private) |
 | 2026-11-23 | The desktop updater reads GitHub releases and installs the DMG natively | the Mac app is not a PWA: reloading a service worker can never install a new bundle. A GitHub release check plus a native download/replace/relaunch is the smallest path that needs no Sparkle dependency and no signing infrastructure. The check is unavailable, not silently "up to date", when releases are not readable — which is the current state with a private repository | `desktopUpdate.ts`, `UpdateInstaller`, `AppUpdateScreen.tsx` |
 | 2026-11-22 | Providers move between devices as a copyable setup code, never through the server | the link can embed a debrid key, and the product also avoids any debrid integration of its own so a store review is not blocked by one. A code the user copies by hand transfers the same data without a row, a log or a dependency; a passphrase-encrypted sync remains possible later but needs crypto code and a recovery story | `packages/addons/src/setupTransfer.ts`, `ProviderTransferScreen.tsx` |
@@ -508,6 +515,23 @@ local merge of `main` into the branch, not on a device.
    current DMG is ad-hoc signed and needs right-click → Open.
 
 ## Session log
+
+### 2026-11-23 (0.7.4: accounts and updates verified)
+- Sign-up shows a confirmation state instead of signing in; forgot-password and
+  the new-password screen work on web (URL fragment) and native (deep link).
+- The desktop updater was exercised end-to-end: it downloaded the published
+  0.7.4 DMG, replaced /Applications and relaunched.
+- Supabase still needs **Confirm email = on** and the redirect URLs allow-listed
+  before a real confirmation mail is sent.
+
+### 2026-11-23 (account lifecycle)
+- Sign-up no longer implies a session when the backend requires confirmation; the
+  screen shows the "check your email" state.
+- Forgot password and the new-password screen are implemented for web (hash) and
+  native (deep link; tokens adopted through `setSession`). 12 new copy keys,
+  8 new tests.
+- Still requires the Supabase dashboard: Confirm email ON and the redirect URLs
+  allow-listed (documented in `docs/builds/supabase-project.md`).
 
 ### 2026-11-23 (public repository)
 - Reviewed what publication would expose: no device UDID, account data or

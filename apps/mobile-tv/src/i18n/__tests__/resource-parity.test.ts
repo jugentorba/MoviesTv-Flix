@@ -107,7 +107,7 @@ test('the screens pack is translated, not just English under other locale names'
   // The `screens` pack is what PR #56–#62 migrated. A locale that kept the English
   // values would pass every screen test while showing English in the app, so count
   // the strings that actually differ from English.
-  expect(SCREEN_RESOURCE_KEYS).toHaveLength(399);
+  expect(SCREEN_RESOURCE_KEYS).toHaveLength(411);
 
   for (const locale of ['sq', 'fr', 'de']) {
     const pack = SCREEN_PACKS[locale];

@@ -11,6 +11,13 @@ export interface AccountApi {
   signIn(email: string, password: string): Promise<void>;
   signUp(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
+  /** Sends a reset email; resolves false when the backend refused or is absent. */
+  requestPasswordReset?(email: string): Promise<boolean>;
+  /** Sets a new password for the recovery session. */
+  updatePassword?(password: string): Promise<boolean>;
+  /** Leaves the "choose a new password" screen. */
+  finishRecovery?(): void;
+  passwordRecovery?: boolean;
 }
 
 export const AccountContext = createContext<AccountApi | null>(null);

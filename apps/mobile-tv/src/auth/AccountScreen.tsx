@@ -123,6 +123,11 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
   const [showAdvancedSetup, setShowAdvancedSetup] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<'signIn' | 'signUp' | null>(null);
+  const [mode, setMode] = useState<'signIn' | 'signUp' | 'reset'>('signIn');
+  const [resetSent, setResetSent] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordUpdated, setPasswordUpdated] = useState(false);
   const normalizedEmail = email.trim().toLowerCase();
   // The buttons stay tappable; the requirement is explained on press instead of
   // the control refusing silently, which is what made "Create account" look dead.
@@ -217,6 +222,51 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
       setPassword('');
       setSubmitting(false);
       setBusyAction(null);
+    }
+  };
+
+  const submitReset = async () => {
+    if (!canSubmit) return;
+    if (!validAccountEmail(normalizedEmail)) {
+      setFormError(t('account.emailInvalid'));
+      return;
+    }
+    setFormError(null);
+    setResetSent(false);
+    setSubmitting(true);
+    try {
+      const sent = await account.requestPasswordReset?.(normalizedEmail) ?? false;
+      if (sent) {
+        setResetSent(true);
+        setPassword('');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitNewPassword = async () => {
+    if (!canSubmit) return;
+    if (password.length < 6) {
+      setPasswordError(t('account.passwordTooShort'));
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError(t('account.passwordMismatch'));
+      return;
+    }
+    setPasswordError(null);
+    setSubmitting(true);
+    try {
+      const updated = await account.updatePassword?.(password) ?? false;
+      if (updated) {
+        setPasswordUpdated(true);
+        setPassword('');
+        setConfirmPassword('');
+        account.finishRecovery?.();
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -401,6 +451,106 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
         />
       ) : account.backendAvailable ? (
         <View style={styles.form}>
+          {account.passwordRecovery ? (
+            <View style={styles.form} testID="account-recovery">
+              <Text style={styles.formTitle}>{t('account.newPasswordTitle')}</Text>
+              <Text style={styles.statusBody}>{t('account.newPasswordIntro')}</Text>
+              <TextInput
+                testID="account-new-password"
+                accessibilityLabel={t('account.password')}
+                value={password}
+                onChangeText={(value) => setPassword(value.slice(0, 1024))}
+                placeholder={t('account.password')}
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                maxLength={1024}
+                secureTextEntry
+                style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
+              />
+              <TextInput
+                testID="account-confirm-password"
+                accessibilityLabel={t('account.newPasswordConfirm')}
+                value={confirmPassword}
+                onChangeText={(value) => setConfirmPassword(value.slice(0, 1024))}
+                placeholder={t('account.newPasswordConfirm')}
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                maxLength={1024}
+                secureTextEntry
+                style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
+              />
+              {passwordError ? (
+                <Text accessibilityRole="alert" testID="account-password-error" style={styles.fieldError}>
+                  {passwordError}
+                </Text>
+              ) : null}
+              {passwordUpdated ? (
+                <Text style={[styles.message, { writingDirection: direction }]}>
+                  {t('account.passwordUpdated')}
+                </Text>
+              ) : null}
+              <ActionButton
+                label={t('account.savePassword')}
+                primary
+                disabled={!canSubmit}
+                testID="account-save-password"
+                onPress={() => { void submitNewPassword(); }}
+              />
+            </View>
+          ) : mode === 'reset' ? (
+            <View style={styles.form} testID="account-reset">
+              <Text style={styles.formTitle}>{t('account.resetTitle')}</Text>
+              <Text style={styles.statusBody}>{t('account.resetIntro')}</Text>
+              <TextInput
+                testID="account-email"
+                accessibilityLabel={t('account.email')}
+                value={email}
+                onChangeText={(value) => setEmail(value.replace(/[\r\n\t]/g, ''))}
+                placeholder={t('account.email')}
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
+                maxLength={320}
+                keyboardType="email-address"
+                style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
+              />
+              {resetSent ? (
+                <Text testID="account-reset-sent" style={[styles.message, { writingDirection: direction }]}>
+                  {t('account.resetSent')}
+                </Text>
+              ) : null}
+              {formError ? (
+                <Text accessibilityRole="alert" testID="account-form-error" style={styles.fieldError}>
+                  {formError}
+                </Text>
+              ) : null}
+              <ActionButton
+                label={t('account.resetSend')}
+                primary
+                disabled={!canSubmit}
+                testID="account-reset-send"
+                onPress={() => { void submitReset(); }}
+              />
+              <ActionButton
+                label={t('account.backToSignIn')}
+                testID="account-reset-back"
+                onPress={() => {
+                  setMode('signIn');
+                  setResetSent(false);
+                  setFormError(null);
+                }}
+              />
+            </View>
+          ) : (
+          <>
           <TextInput
             testID="account-email"
             accessibilityLabel={t('account.email')}
@@ -453,6 +603,25 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
               onPress={() => { void submitSignUp(); }}
             />
           </View>
+          {account.requestPasswordReset ? (
+            <Pressable
+              accessibilityRole="button"
+              testID="account-forgot-password"
+              onPress={() => {
+                setMode('reset');
+                setResetSent(false);
+                setFormError(null);
+                setPassword('');
+              }}
+              style={({ pressed }) => [styles.forgot, pressed && styles.pressed]}
+            >
+              <Text style={[styles.forgotText, { writingDirection: direction }]}>
+                {t('account.forgotPassword')}
+              </Text>
+            </Pressable>
+          ) : null}
+          </>
+          )}
         </View>
       ) : null}
 
@@ -493,6 +662,8 @@ const createStyles = (theme: Theme) => StyleSheet.create({
   statusBody: { color: theme.colors.muted, fontSize: 14, lineHeight: 21 },
   userId: { color: theme.colors.muted, fontSize: 10, marginTop: 4 },
   form: { gap: theme.spacing.md },
+  forgot: { alignSelf: 'flex-start', paddingVertical: 6 },
+  forgotText: { color: theme.colors.accentSoft, fontSize: 13, fontWeight: '600' },
   formTitle: { color: theme.colors.text, fontSize: 15, fontWeight: '800' },
   input: {
     minHeight: 52,

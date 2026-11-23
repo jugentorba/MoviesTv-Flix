@@ -28,9 +28,11 @@ test('Supabase auth subscription emits identity only and unsubscribes', () => {
     refresh_token: ' REFRESH-SECRET ',
   });
 
+  // The event travels alongside the identity so a recovery link can open the
+  // set-password screen without exposing tokens.
   expect(listener).toHaveBeenCalledWith({
     userId: 'user-1',
-  });
+  }, 'SIGNED_IN');
   expect(JSON.stringify(listener.mock.calls))
     .not.toContain('ACCESS-SECRET');
   expect(JSON.stringify(listener.mock.calls))
@@ -103,8 +105,8 @@ test('Supabase auth subscription maps invalid or signed-out sessions to null', (
     refresh_token: 'refresh',
   });
 
-  expect(listener).toHaveBeenNthCalledWith(1, null);
-  expect(listener).toHaveBeenNthCalledWith(2, null);
+  expect(listener).toHaveBeenNthCalledWith(1, null, 'SIGNED_OUT');
+  expect(listener).toHaveBeenNthCalledWith(2, null, 'SIGNED_IN');
 });
 
 

@@ -810,6 +810,12 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = CommandLine.arguments
+        if let index = args.firstIndex(of: "--install-update"), index + 1 < args.count {
+            // Test hook: runs exactly the installer the App updates screen calls,
+            // so the download/mount/replace/relaunch path can be exercised.
+            UpdateInstaller.shared.install(from: args[index + 1])
+            return
+        }
         if let index = args.firstIndex(of: "--url"), index + 1 < args.count,
            let override = URL(string: args[index + 1]) {
             startURL = override

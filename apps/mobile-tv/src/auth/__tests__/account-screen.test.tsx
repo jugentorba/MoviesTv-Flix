@@ -368,3 +368,53 @@ test('German account screen uses first-party sync copy', () => {
   ).toBeTruthy();
   expect(screen.getByTestId('account-sign-in').props.children).toBeTruthy();
 });
+
+test('forgot password opens the reset form and sends the link', async () => {
+  const requestPasswordReset = jest.fn(async () => true);
+  const account = guest({ requestPasswordReset });
+  renderAccount(account, 'en');
+
+  fireEvent.press(screen.getByTestId('account-forgot-password'));
+  fireEvent.changeText(screen.getByTestId('account-email'), 'lost@example.com');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('account-reset-send'));
+  });
+
+  expect(requestPasswordReset).toHaveBeenCalledWith('lost@example.com');
+  expect(screen.getByTestId('account-reset-sent')).toBeTruthy();
+});
+
+test('a recovery link asks for a new password and confirms it', async () => {
+  const updatePassword = jest.fn(async () => true);
+  const finishRecovery = jest.fn();
+  const account = guest({
+    passwordRecovery: true,
+    updatePassword,
+    finishRecovery,
+  });
+  renderAccount(account, 'en');
+
+  fireEvent.changeText(screen.getByTestId('account-new-password'), 'brandnew1');
+  fireEvent.changeText(screen.getByTestId('account-confirm-password'), 'brandnew1');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('account-save-password'));
+  });
+
+  expect(updatePassword).toHaveBeenCalledWith('brandnew1');
+  expect(finishRecovery).toHaveBeenCalled();
+  expect(screen.getByText('Password updated.')).toBeTruthy();
+});
+
+test('a mismatched confirmation never reaches the backend', async () => {
+  const updatePassword = jest.fn(async () => true);
+  renderAccount(guest({ passwordRecovery: true, updatePassword }), 'en');
+
+  fireEvent.changeText(screen.getByTestId('account-new-password'), 'brandnew1');
+  fireEvent.changeText(screen.getByTestId('account-confirm-password'), 'different1');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('account-save-password'));
+  });
+
+  expect(updatePassword).not.toHaveBeenCalled();
+  expect(screen.getByTestId('account-password-error')).toBeTruthy();
+});

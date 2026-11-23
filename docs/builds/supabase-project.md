@@ -47,11 +47,27 @@ npx supabase@latest db push \
 | --- | --- | --- |
 | Anonymous sign-ins | **on** | the app is usable without an account; an account is an opt-in upgrade |
 | Allow manual linking | **on** | lets a guest identity be attached to a real provider without losing their data |
-| Confirm email | **off** | development only — turn it back on before public release |
+| Confirm email | **on** for release builds | the app must not sign a new account in before the address is verified. The client already handles the "no session yet" answer: it shows "check your email" instead of letting anyone in |
+| Site URL | the web origin (PWA) | where confirmation and recovery links land when no redirect is allowed |
+| Redirect URLs | `moviestvflix://auth/reset`, web origin | allow-listed targets; without them Supabase falls back to Site URL and the native app never receives the tokens |
 | Allow new users to sign up | **on** | |
 
 `/auth/v1/settings` reports `mailer_autoconfirm: true` when confirmation is
 **off**. The flag name is inverted from the dashboard toggle.
+
+## Account lifecycle in the client
+
+- **Sign-up** calls `signUp` with an `emailRedirectTo`. If Supabase requires
+  confirmation there is no session, and the screen says so instead of opening the
+  app as a signed-in user.
+- **Forgot password** sends `resetPasswordForEmail` with the same redirect.
+- **Recovery**: the web build adopts the session from the URL fragment and
+  Supabase emits `PASSWORD_RECOVERY`; the native build reads its own
+  `moviestvflix://auth/reset` deep link, parses `access_token`/`refresh_token`,
+  and calls `setSession`. Both paths land on "choose a new password", which calls
+  `updateUser({ password })`.
+- A confirmation link also carries tokens but has `type=signup`, so it never
+  opens the reset screen.
 
 ## Verifying isolation
 

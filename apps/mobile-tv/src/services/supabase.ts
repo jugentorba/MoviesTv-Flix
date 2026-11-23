@@ -5,6 +5,7 @@ import type {
   AuthSession,
 } from '@moviestv/auth';
 import type { AsyncStorageLike } from '@moviestv/storage';
+import { parseRecoveryTokens } from '../auth/recoveryLink';
 import {
   readSupabaseConfig,
   type SupabaseConfigResult,
@@ -98,16 +99,53 @@ export class SupabaseAuthClient implements AuthClient {
     return session;
   }
 
-  async signUp(email: string, password: string) {
+  async signUp(email: string, password: string, emailRedirectTo?: string) {
     const { data, error } = await withAuthTimeout(
       () => this.client.auth.signUp({
         email: email.trim().toLowerCase(),
         password,
+        ...(emailRedirectTo
+          ? { options: { emailRedirectTo } }
+          : {}),
       }),
       this.timeoutMs,
     );
     if (error) throw error;
     return sessionOf(data.session);
+  }
+
+  async requestPasswordReset(email: string, redirectTo?: string) {
+    const { error } = await withAuthTimeout(
+      () => this.client.auth.resetPasswordForEmail(
+        email.trim().toLowerCase(),
+        redirectTo ? { redirectTo } : undefined,
+      ),
+      this.timeoutMs,
+    );
+    if (error) throw error;
+  }
+
+  async updatePassword(password: string) {
+    const { error } = await withAuthTimeout(
+      () => this.client.auth.updateUser({ password }),
+      this.timeoutMs,
+    );
+    if (error) throw error;
+  }
+
+  async restoreFromUrl(url: string) {
+    const tokens = parseRecoveryTokens(url);
+    if (!tokens) return null;
+    const { data, error } = await withAuthTimeout(
+      () => this.client.auth.setSession({
+        access_token: tokens.accessToken,
+        refresh_token: tokens.refreshToken,
+      }),
+      this.timeoutMs,
+    );
+    if (error) throw error;
+    const session = sessionOf(data.session);
+    return session ? { userId: session.userId } : null;
   }
 
   async signOut() {
@@ -117,13 +155,14 @@ export class SupabaseAuthClient implements AuthClient {
     );
     if (error) throw error;
   }
-  subscribe(listener: (identity: AuthIdentity | null) => void): () => void {
-    const { data } = this.client.auth.onAuthStateChange((_event, session) => {
+  subscribe(listener: (identity: AuthIdentity | null, event?: string) => void): () => void {
+    const { data } = this.client.auth.onAuthStateChange((event, session) => {
       const authenticated = sessionOf(session);
       listener(
         authenticated
           ? { userId: authenticated.userId }
           : null,
+        event,
       );
     });
     return () => {

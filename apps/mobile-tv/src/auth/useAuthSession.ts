@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Linking, Platform } from 'react-native';
 import type {
   AuthClient,
   AuthIdentity,
 } from '@moviestv/auth';
 import { safeAuthErrorMessage } from './authError';
+import { authLinkType, parseRecoveryTokens } from './recoveryLink';
+
+/** Where Supabase should send the user after they follow an email link. */
+function recoveryRedirect(): string | undefined {
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined' || !window.location?.origin) return undefined;
+    return `${window.location.origin}/`;
+  }
+  return 'moviestvflix://auth/reset';
+}
 
 function validEmail(email: string): boolean {
   const normalized = email.trim();
@@ -35,6 +46,9 @@ export function useAuthSession(client: AuthClient) {
   const [sessionClient, setSessionClient] = useState(client);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>();
+  // A recovery link puts the app into "choose a new password" before anything
+  // else, even though the session behind it is a normal one.
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const operationRef = useRef(0);
 
   useEffect(() => {
@@ -45,8 +59,11 @@ export function useAuthSession(client: AuthClient) {
     setLoading(true);
     setMessage(undefined);
 
-    const unsubscribe = client.subscribe?.((value) => {
+    const unsubscribe = client.subscribe?.((value, event) => {
       if (!active) return;
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true);
+      }
       // Auth-state events are authoritative. Invalidate any stale restore or
       // action completion so another tab/device-side change cannot be undone
       // by an older promise resolving afterward.
@@ -55,6 +72,38 @@ export function useAuthSession(client: AuthClient) {
       setMessage(undefined);
       setLoading(false);
     });
+
+    // Browser recovery links are parsed by the Supabase client itself; the
+    // native app has to read its own deep link and adopt the session tokens.
+    if (Platform.OS !== 'web' && client.restoreFromUrl) {
+      const adopt = (url: string | null) => {
+        if (!active || !url) return;
+        const tokens = parseRecoveryTokens(url);
+        if (!tokens) return;
+        operationRef.current += 1;
+        // A confirmation link also carries tokens; only a reset link may ask
+        // for a new password.
+        if (authLinkType(url) === 'recovery') {
+          setPasswordRecovery(true);
+        }
+        setLoading(true);
+        void client.restoreFromUrl?.(url).then((value) => {
+          if (!active) return;
+          setSession(identityOf(value));
+        }).catch((error) => {
+          if (active) setMessage(safeAuthErrorMessage(error));
+        }).finally(() => {
+          if (active) setLoading(false);
+        });
+      };
+      void Linking.getInitialURL().then(adopt).catch(() => undefined);
+      const subscription = Linking.addEventListener('url', ({ url }) => adopt(url));
+      return () => {
+        active = false;
+        unsubscribe?.();
+        subscription.remove();
+      };
+    }
 
     void client.restoreSession()
       .then((value) => {
@@ -143,6 +192,7 @@ export function useAuthSession(client: AuthClient) {
       const next = await client.signUp(
         email.trim().toLowerCase(),
         password,
+        recoveryRedirect(),
       );
       if (operation !== operationRef.current) return;
       setSession(identityOf(next));
@@ -161,6 +211,66 @@ export function useAuthSession(client: AuthClient) {
       }
     }
   }, [client]);
+
+  const requestPasswordReset = useCallback(async (email: string) => {
+    if (!client.requestPasswordReset) return false;
+    if (!validEmail(email)) {
+      setMessage('Invalid email or password.');
+      return false;
+    }
+
+    const operation = ++operationRef.current;
+    setLoading(true);
+    setMessage(undefined);
+    try {
+      await client.requestPasswordReset(
+        email.trim().toLowerCase(),
+        recoveryRedirect(),
+      );
+      if (operation !== operationRef.current) return false;
+      return true;
+    } catch (error) {
+      if (operation === operationRef.current) {
+        setMessage(safeAuthErrorMessage(error));
+      }
+      return false;
+    } finally {
+      if (operation === operationRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [client]);
+
+  const updatePassword = useCallback(async (password: string) => {
+    if (!client.updatePassword) return false;
+    if (password.length < 6 || password.length > 1024) {
+      setMessage('Invalid email or password.');
+      return false;
+    }
+
+    const operation = ++operationRef.current;
+    setLoading(true);
+    setMessage(undefined);
+    try {
+      await client.updatePassword(password);
+      if (operation !== operationRef.current) return false;
+      setPasswordRecovery(false);
+      return true;
+    } catch (error) {
+      if (operation === operationRef.current) {
+        setMessage(safeAuthErrorMessage(error));
+      }
+      return false;
+    } finally {
+      if (operation === operationRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [client]);
+
+  const finishRecovery = useCallback(() => {
+    setPasswordRecovery(false);
+  }, []);
 
   const signOut = useCallback(async () => {
     const operation = ++operationRef.current;
@@ -191,5 +301,9 @@ export function useAuthSession(client: AuthClient) {
     signIn,
     signUp,
     signOut,
+    requestPasswordReset,
+    updatePassword,
+    finishRecovery,
+    passwordRecovery,
   };
 }
