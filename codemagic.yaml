@@ -1,0 +1,382 @@
+workflows:
+  android-preview:
+    name: Android phone preview APK
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    environment:
+      groups:
+        - moviestv_preview_signing
+      node: 22
+      java: 17
+      vars:
+        EXPO_TV: "0"
+        EXPO_PUBLIC_PREVIEW_MODE: "1"
+    cache:
+      cache_paths:
+        - $HOME/.pnpm-store
+        - $HOME/.gradle/caches
+    scripts:
+      - name: Enable pnpm
+        script: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+          pnpm config set store-dir "$HOME/.pnpm-store"
+
+      - name: Install dependencies
+        script: pnpm install --frozen-lockfile
+
+      - name: Verify source
+        script: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Generate Android project
+        script: pnpm --filter @moviestv/mobile-tv exec expo prebuild --platform android --clean --no-install
+
+      - name: Configure Android SDK
+        script: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          echo "sdk.dir=$SDK_ROOT" > apps/mobile-tv/android/local.properties
+
+      - name: Build release APK
+        script: |
+          export EXPO_PUBLIC_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
+          cd apps/mobile-tv/android
+          NODE_ENV=production ./gradlew assembleRelease --no-daemon
+
+      - name: Sign, name, and verify APK
+        script: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+
+          APK_PATH="$(find apps/mobile-tv/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$APK_PATH"
+
+          BUILD_TOOLS="$(python3 -c 'import os,re,sys; root=sys.argv[1]; candidates=[os.path.join(root,name) for name in os.listdir(root) if os.path.isdir(os.path.join(root,name))]; key=lambda path:(tuple(int(value) for value in re.findall(r"\d+",os.path.basename(path))),os.path.basename(path)); print(max(candidates,key=key) if candidates else "")' "$SDK_ROOT/build-tools")"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+
+          mkdir -p artifacts/android
+          KEYSTORE="$CM_BUILD_DIR/.moviestv-preview-signing.jks"
+          ALIGNED="$CM_BUILD_DIR/artifacts/android/preview-aligned.apk"
+          FINAL="$CM_BUILD_DIR/artifacts/android/MoviesTv-Flix-android-phone-preview.apk"
+          trap 'rm -f "$ALIGNED" "$KEYSTORE"' EXIT
+
+          "$BUILD_TOOLS/zipalign" -P 16 -f 4 "$APK_PATH" "$ALIGNED"
+
+          : "${CM_KEYSTORE:?Missing CM_KEYSTORE in moviestv_preview_signing}"
+          : "${CM_KEYSTORE_PASSWORD:?Missing CM_KEYSTORE_PASSWORD in moviestv_preview_signing}"
+          : "${CM_KEY_ALIAS:?Missing CM_KEY_ALIAS in moviestv_preview_signing}"
+          : "${CM_KEY_PASSWORD:?Missing CM_KEY_PASSWORD in moviestv_preview_signing}"
+
+          python3 - "$KEYSTORE" <<'PY'
+          import base64
+          import os
+          import pathlib
+          import sys
+
+          encoded = ''.join(os.environ["CM_KEYSTORE"].split())
+          pathlib.Path(sys.argv[1]).write_bytes(
+              base64.b64decode(encoded, validate=True)
+          )
+          PY
+          chmod 600 "$KEYSTORE"
+
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$CM_KEY_ALIAS" \
+            --ks-pass "pass:$CM_KEYSTORE_PASSWORD" \
+            --key-pass "pass:$CM_KEY_PASSWORD" \
+            --out "$FINAL" \
+            "$ALIGNED"
+
+          "$APKSIGNER" verify --print-certs "$FINAL" > "$FINAL.signing.txt"
+          rm -f "$ALIGNED" "$KEYSTORE"
+          bash scripts/verify-android-preview.sh "$FINAL" phone "$(git rev-parse --short=12 HEAD)"
+          (
+            cd "$(dirname "$FINAL")"
+            shasum -a 256 "$(basename "$FINAL")" > "$(basename "$FINAL").sha256"
+          )
+
+    artifacts:
+      - artifacts/android/MoviesTv-Flix-android-phone-preview.apk
+      - artifacts/android/MoviesTv-Flix-android-phone-preview.apk.sha256
+      - artifacts/android/MoviesTv-Flix-android-phone-preview.apk.signing.txt
+
+  android-tv-preview:
+    name: Android TV preview APK
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    environment:
+      groups:
+        - moviestv_preview_signing
+      node: 22
+      java: 17
+      vars:
+        EXPO_TV: "1"
+        EXPO_PUBLIC_PREVIEW_MODE: "1"
+    cache:
+      cache_paths:
+        - $HOME/.pnpm-store
+        - $HOME/.gradle/caches
+    scripts:
+      - name: Enable pnpm
+        script: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+          pnpm config set store-dir "$HOME/.pnpm-store"
+
+      - name: Install dependencies
+        script: pnpm install --frozen-lockfile
+
+      - name: Verify source
+        script: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Generate Android TV project
+        script: pnpm --filter @moviestv/mobile-tv exec expo prebuild --platform android --clean --no-install
+
+      - name: Configure Android SDK
+        script: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          echo "sdk.dir=$SDK_ROOT" > apps/mobile-tv/android/local.properties
+
+      - name: Build release APK
+        script: |
+          export EXPO_PUBLIC_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
+          cd apps/mobile-tv/android
+          NODE_ENV=production ./gradlew assembleRelease --no-daemon
+
+      - name: Sign, name, and verify APK
+        script: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+
+          APK_PATH="$(find apps/mobile-tv/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$APK_PATH"
+
+          BUILD_TOOLS="$(python3 -c 'import os,re,sys; root=sys.argv[1]; candidates=[os.path.join(root,name) for name in os.listdir(root) if os.path.isdir(os.path.join(root,name))]; key=lambda path:(tuple(int(value) for value in re.findall(r"\d+",os.path.basename(path))),os.path.basename(path)); print(max(candidates,key=key) if candidates else "")' "$SDK_ROOT/build-tools")"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+
+          mkdir -p artifacts/android-tv
+          KEYSTORE="$CM_BUILD_DIR/.moviestv-preview-signing.jks"
+          ALIGNED="$CM_BUILD_DIR/artifacts/android-tv/preview-aligned.apk"
+          FINAL="$CM_BUILD_DIR/artifacts/android-tv/MoviesTv-Flix-android-tv-preview.apk"
+          trap 'rm -f "$ALIGNED" "$KEYSTORE"' EXIT
+
+          "$BUILD_TOOLS/zipalign" -P 16 -f 4 "$APK_PATH" "$ALIGNED"
+
+          : "${CM_KEYSTORE:?Missing CM_KEYSTORE in moviestv_preview_signing}"
+          : "${CM_KEYSTORE_PASSWORD:?Missing CM_KEYSTORE_PASSWORD in moviestv_preview_signing}"
+          : "${CM_KEY_ALIAS:?Missing CM_KEY_ALIAS in moviestv_preview_signing}"
+          : "${CM_KEY_PASSWORD:?Missing CM_KEY_PASSWORD in moviestv_preview_signing}"
+
+          python3 - "$KEYSTORE" <<'PY'
+          import base64
+          import os
+          import pathlib
+          import sys
+
+          encoded = ''.join(os.environ["CM_KEYSTORE"].split())
+          pathlib.Path(sys.argv[1]).write_bytes(
+              base64.b64decode(encoded, validate=True)
+          )
+          PY
+          chmod 600 "$KEYSTORE"
+
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$CM_KEY_ALIAS" \
+            --ks-pass "pass:$CM_KEYSTORE_PASSWORD" \
+            --key-pass "pass:$CM_KEY_PASSWORD" \
+            --out "$FINAL" \
+            "$ALIGNED"
+
+          "$APKSIGNER" verify --print-certs "$FINAL" > "$FINAL.signing.txt"
+          rm -f "$ALIGNED" "$KEYSTORE"
+          bash scripts/verify-android-preview.sh "$FINAL" tv "$(git rev-parse --short=12 HEAD)"
+          (
+            cd "$(dirname "$FINAL")"
+            shasum -a 256 "$(basename "$FINAL")" > "$(basename "$FINAL").sha256"
+          )
+
+    artifacts:
+      - artifacts/android-tv/MoviesTv-Flix-android-tv-preview.apk
+      - artifacts/android-tv/MoviesTv-Flix-android-tv-preview.apk.sha256
+      - artifacts/android-tv/MoviesTv-Flix-android-tv-preview.apk.signing.txt
+
+  ios-resignable-preview:
+    name: iOS re-signable preview IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      node: 22
+      xcode: 26.5
+      cocoapods: default
+      vars:
+        EXPO_TV: "0"
+        EXPO_PUBLIC_PREVIEW_MODE: "1"
+    cache:
+      cache_paths:
+        - $HOME/.pnpm-store
+        - $HOME/Library/Caches/CocoaPods
+    scripts:
+      - name: Enable pnpm
+        script: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+          pnpm config set store-dir "$HOME/.pnpm-store"
+
+      - name: Install dependencies
+        script: pnpm install --frozen-lockfile
+
+      - name: Verify source
+        script: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Generate iOS project
+        script: pnpm --filter @moviestv/mobile-tv exec expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods
+        script: |
+          cd apps/mobile-tv/ios
+          pod install
+
+      - name: Build unsigned device app
+        script: |
+          set -euo pipefail
+          export NODE_ENV=production
+          export EXPO_PUBLIC_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
+          IOS_DIR="$CM_BUILD_DIR/apps/mobile-tv/ios"
+          WORKSPACE="$(find "$IOS_DIR" -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          test -n "$WORKSPACE"
+
+          PROJECT="$(find "$IOS_DIR" -maxdepth 1 -type d -name '*.xcodeproj' ! -name 'Pods.xcodeproj' -print -quit)"
+          test -n "$PROJECT"
+          SCHEME_FILE="$(find "$PROJECT/xcshareddata/xcschemes" -maxdepth 1 -type f -name '*.xcscheme' -print -quit)"
+          test -n "$SCHEME_FILE"
+          SCHEME="$(basename "$SCHEME_FILE" .xcscheme)"
+          test -n "$SCHEME"
+
+          DERIVED="$CM_BUILD_DIR/artifacts/ios-derived"
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+          APP="$(find "$DERIVED/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP"
+
+          mkdir -p artifacts/ios
+          bash scripts/package-ios-resignable.sh "$APP" artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa
+          bash scripts/verify-ios-resignable.sh \
+            artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa \
+            "$(git rev-parse --short=12 HEAD)"
+          (
+            cd artifacts/ios
+            shasum -a 256 MoviesTv-Flix-ios-resignable-preview.ipa > MoviesTv-Flix-ios-resignable-preview.ipa.sha256
+          )
+
+    artifacts:
+      - artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa
+      - artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa.sha256
+      - /tmp/xcodebuild_logs/*.log
+
+  tvos-resignable-preview:
+    name: tvOS re-signable preview IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      node: 22
+      xcode: 26.5
+      cocoapods: default
+      vars:
+        EXPO_TV: "1"
+        EXPO_PUBLIC_PREVIEW_MODE: "1"
+    cache:
+      cache_paths:
+        - $HOME/.pnpm-store
+        - $HOME/Library/Caches/CocoaPods
+    scripts:
+      - name: Enable pnpm
+        script: |
+          corepack enable
+          corepack prepare pnpm@11.25.0 --activate
+          pnpm config set store-dir "$HOME/.pnpm-store"
+
+      - name: Install dependencies
+        script: pnpm install --frozen-lockfile
+
+      - name: Verify source
+        script: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Generate tvOS project
+        script: pnpm --filter @moviestv/mobile-tv exec expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods
+        script: |
+          cd apps/mobile-tv/ios
+          pod install
+
+      - name: Build unsigned Apple TV app
+        script: |
+          set -euo pipefail
+          export NODE_ENV=production
+          export EXPO_PUBLIC_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
+          IOS_DIR="$CM_BUILD_DIR/apps/mobile-tv/ios"
+          WORKSPACE="$(find "$IOS_DIR" -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          test -n "$WORKSPACE"
+
+          PROJECT="$(find "$IOS_DIR" -maxdepth 1 -type d -name '*.xcodeproj' ! -name 'Pods.xcodeproj' -print -quit)"
+          test -n "$PROJECT"
+          SCHEME_FILE="$(find "$PROJECT/xcshareddata/xcschemes" -maxdepth 1 -type f -name '*.xcscheme' -print -quit)"
+          test -n "$SCHEME_FILE"
+          SCHEME="$(basename "$SCHEME_FILE" .xcscheme)"
+          test -n "$SCHEME"
+
+          DERIVED="$CM_BUILD_DIR/artifacts/tvos-derived"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk appletvos \
+            -destination 'generic/platform=tvOS' \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP="$(find "$DERIVED/Build/Products/Release-appletvos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP"
+
+          mkdir -p artifacts/tvos
+          bash scripts/package-ios-resignable.sh \
+            "$APP" \
+            artifacts/tvos/MoviesTv-Flix-tvos-resignable-preview.ipa
+          bash scripts/verify-tvos-resignable.sh \
+            artifacts/tvos/MoviesTv-Flix-tvos-resignable-preview.ipa \
+            "$(git rev-parse --short=12 HEAD)"
+          (
+            cd artifacts/tvos
+            shasum -a 256 MoviesTv-Flix-tvos-resignable-preview.ipa > MoviesTv-Flix-tvos-resignable-preview.ipa.sha256
+          )
+
+    artifacts:
+      - artifacts/tvos/MoviesTv-Flix-tvos-resignable-preview.ipa
+      - artifacts/tvos/MoviesTv-Flix-tvos-resignable-preview.ipa.sha256
+      - /tmp/xcodebuild_logs/*.log

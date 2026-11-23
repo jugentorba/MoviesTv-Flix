@@ -1,0 +1,21 @@
+{
+  "name": "moviestv-flix",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "build:pwa": "EXPO_TV=0 EXPO_PUBLIC_PREVIEW_MODE=1 pnpm check:pwa && EXPO_TV=0 EXPO_PUBLIC_PREVIEW_MODE=1 pnpm --filter @moviestv/mobile-tv exec tsc --noEmit -p tsconfig.playback.json && EXPO_TV=0 EXPO_PUBLIC_PREVIEW_MODE=1 pnpm --filter @moviestv/mobile-tv export:web && pnpm --filter @moviestv/mobile-tv verify:web",
+    "check:pwa": "EXPO_TV=0 EXPO_PUBLIC_PREVIEW_MODE=1 pnpm lint && EXPO_TV=0 EXPO_PUBLIC_PREVIEW_MODE=1 pnpm test"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^26.0.0",
+    "eslint": "^9.35.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.1",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.42.0"
+  }
+}

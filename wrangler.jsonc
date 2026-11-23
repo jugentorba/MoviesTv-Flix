@@ -1,0 +1,13 @@
+{
+  "name": "moviestv-flix",
+  "main": "./worker/index.js",
+  "compatibility_date": "2026-09-19",
+  "assets": {
+    "directory": "./apps/mobile-tv/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  }
+}

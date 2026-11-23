@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "baseUrl": ".",
+    "paths": {
+      "@moviestv/core": ["packages/core/src/index.ts"],
+      "@moviestv/storage": ["packages/storage/src/index.ts"],
+      "@moviestv/sync": ["packages/sync/src/index.ts"],
+      "@moviestv/auth": ["packages/auth/src/index.ts"],
+      "@moviestv/ui": ["packages/ui/src/index.ts"],
+      "@moviestv/catalog": ["packages/catalog/src/index.ts"],
+      "@moviestv/playback": ["packages/playback/src/index.ts"],
+      "@moviestv/addons": ["packages/addons/src/index.ts"],
+      "@moviestv/live-tv": ["packages/live-tv/src/index.ts"]
+    }
+  }
+}

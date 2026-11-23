@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MoviesTv-Flix — web engine container probe</title>
+<style>
+  body { font: 13px/1.5 ui-monospace, Menlo, monospace; background:#0b0b0e; color:#e7e7ea; padding:20px; }
+  h1 { font-size:15px; }
+  pre { background:#15151a; padding:12px; border-radius:8px; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Web engine container probe — MoviesTv-Flix</h1>
+<p>Static page, no build step: serve the folder with any HTTP server (for example
+<code>python3 -m http.server 8781</code>) and open it on the device or browser you
+want to measure. It reports <code>canPlayType</code> answers and then attempts real
+Matroska and MP4 playback, so the result is engine behaviour, not a claim. The
+POST to <code>/result</code> is optional and fails harmlessly on a plain static
+server; read the output on the page.</p>
+<pre id="out">running…</pre>
+<script>
+/* Real Matroska (EBML 1A45DFA3) samples, verified by magic bytes before use. */
+const SAMPLES = [
+  { key: 'mkv-h264-aac', url: 'https://filesamples.com/samples/video/mkv/sample_640x360.mkv', note: 'Matroska, H.264' },
+  { key: 'mkv-h264-eac3', url: 'https://samples.ffmpeg.org/Matroska/H264+EAC3.mkv', note: 'Matroska, H.264 + E-AC3' },
+  { key: 'mkv-h264-dts', url: 'https://samples.ffmpeg.org/A-codecs/DTS/Edward.Scissorhands.x264.DTS-4.0-48_24.mkv', note: 'Matroska, H.264 + DTS 4.0' },
+  { key: 'mp4-h264-control', url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4', note: 'MP4 H.264 control' },
+  { key: 'mp4-hevc-control', url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h265/720/Big_Buck_Bunny_720_10s_1MB.mp4', note: 'MP4 HEVC control (hev1)' },
+];
+
+const out = document.getElementById('out');
+const log = (m) => { out.textContent += '\n' + m; };
+
+function probeMime(mime) {
+  const v = document.createElement('video');
+  let value = null;
+  try { value = v.canPlayType(mime); } catch (e) { value = 'throw:' + e.name; }
+  return { mime, value, advertises: Boolean(value) };
+}
+
+function mseSupport(mime) {
+  try {
+    if (typeof MediaSource === 'undefined') return 'no MediaSource';
+    return MediaSource.isTypeSupported(mime);
+  } catch (e) { return 'throw:' + e.name; }
+}
+
+function capturedTracks(v) {
+  try {
+    if (typeof v.captureStream !== 'function') return 'no captureStream';
+    const stream = v.captureStream();
+    return { audio: stream.getAudioTracks().length, video: stream.getVideoTracks().length };
+  } catch (e) { return 'throw:' + e.name; }
+}
+
+function frames(v) {
+  try {
+    const q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+    if (q) return q.totalVideoFrames ?? null;
+    if (typeof v.webkitDecodedFrameCount === 'number') return v.webkitDecodedFrameCount;
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function attempt(sample, budgetMs) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.autoplay = true;
+    v.setAttribute('playsinline', '');
+    v.src = sample.url;
+    document.body.appendChild(v);
+    const started = performance.now();
+    let settled = false;
+    let sampledAfterPlaying = false;
+    const result = {
+      key: sample.key, note: sample.note, url: sample.url,
+      readyState: 0, networkState: 0, currentTime: 0, duration: null,
+      videoWidth: 0, videoHeight: 0, error: null, playRejection: null,
+      frames: null, tracks: null, elapsedMs: 0,
+    };
+
+    const finish = (why) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      clearTimeout(afterPlaying);
+      result.readyState = v.readyState;
+      result.networkState = v.networkState;
+      result.currentTime = Number(v.currentTime.toFixed(3));
+      result.duration = Number.isFinite(v.duration) ? Number(v.duration.toFixed(2)) : null;
+      result.videoWidth = v.videoWidth;
+      result.videoHeight = v.videoHeight;
+      result.frames = frames(v);
+      result.tracks = capturedTracks(v);
+      result.elapsedMs = Math.round(performance.now() - started);
+      result.outcome = why;
+      if (v.error) result.error = { code: v.error.code, message: v.error.message || null };
+      try { v.pause(); } catch (e) {}
+      v.removeAttribute('src');
+      try { v.load(); } catch (e) {}
+      v.remove();
+      resolve(result);
+    };
+
+    let afterPlaying;
+    v.addEventListener('playing', () => {
+      if (sampledAfterPlaying) return;
+      sampledAfterPlaying = true;
+      // Give the decoder time to advance the clock and count frames.
+      afterPlaying = setTimeout(() => finish('playing'), 1500);
+    });
+    v.addEventListener('error', () => finish('error'));
+
+    const p = v.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((e) => { result.playRejection = e && e.name; });
+    }
+
+    const timer = setInterval(() => {
+      if (v.videoWidth > 0 && v.currentTime > 0.2 && !sampledAfterPlaying) {
+        sampledAfterPlaying = true;
+        afterPlaying = setTimeout(() => finish('decoding'), 1500);
+        return;
+      }
+      if (v.error) return finish('error');
+      if (performance.now() - started > budgetMs) {
+        return finish(sampledAfterPlaying ? 'decoding-slow' : 'stalled');
+      }
+    }, 250);
+  });
+}
+
+async function main() {
+  const report = {
+    engine: navigator.userAgent,
+    platform: navigator.platform,
+    probes: [
+      probeMime('video/x-matroska'),
+      probeMime('video/webm'),
+      probeMime('video/mp4'),
+      probeMime('application/vnd.apple.mpegurl'),
+      probeMime('video/quicktime'),
+    ],
+    mse: {
+      matroska: mseSupport('video/x-matroska; codecs="avc1.42E01E,mp4a.40.2"'),
+      mp4: mseSupport('video/mp4; codecs="avc1.42E01E,mp4a.40.2"'),
+    },
+    playback: [],
+  };
+
+  log('engine: ' + report.engine);
+  for (const p of report.probes) log('canPlayType(' + p.mime + ') = ' + JSON.stringify(p.value));
+  log('MSE matroska = ' + report.mse.matroska);
+
+  for (const sample of SAMPLES) {
+    log('\n' + sample.key + ' — ' + sample.note);
+    const r = await attempt(sample, 15000);
+    report.playback.push(r);
+    log('  -> ' + r.outcome + ' readyState=' + r.readyState + ' ' + r.videoWidth + 'x' + r.videoHeight
+      + ' dur=' + r.duration + ' t=' + r.currentTime + ' frames=' + r.frames
+      + ' tracks=' + JSON.stringify(r.tracks)
+      + (r.error ? ' error=' + r.error.code + ':' + r.error.message : ''));
+  }
+
+  report.finishedAt = new Date().toISOString();
+  window.__probeReport = report;
+  log('\nDONE');
+  try {
+    await fetch('/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(report) });
+    log('posted to server');
+  } catch (e) { log('post failed: ' + e); }
+}
+
+main();
+</script>
+</body>
+</html>

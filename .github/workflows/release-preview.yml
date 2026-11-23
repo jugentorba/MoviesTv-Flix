@@ -1,0 +1,111 @@
+name: Release preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  deployments: write
+
+concurrency:
+  group: moviestv-full-preview-release
+  cancel-in-progress: false
+
+jobs:
+  android:
+    name: Android phone and TV
+    uses: ./.github/workflows/android-preview.yml
+    with:
+      target: all
+    secrets: inherit
+
+  ios:
+    name: iPhone and iPad
+    uses: ./.github/workflows/ios-resignable-preview.yml
+    secrets: inherit
+
+  tvos:
+    name: Apple TV
+    uses: ./.github/workflows/tvos-resignable-preview.yml
+    secrets: inherit
+
+  pwa:
+    name: PWA
+    needs:
+      - android
+      - ios
+      - tvos
+    uses: ./.github/workflows/cloudflare-pages-deploy.yml
+    secrets: inherit
+
+  versioned:
+    name: Versioned release
+    # Publish whatever actually built. A cancelled macOS runner used to skip this
+    # job entirely, so a run that produced three packages published none.
+    if: always()
+    needs:
+      - android
+      - ios
+      - tvos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # `preview-latest` is the machine-readable channel the in-app updater reads.
+      # This job adds a human-facing release per version with clean asset names,
+      # so downloading never requires guessing which preview build is which.
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ vars.EXPO_PUBLIC_APP_VERSION || '0.1.0' }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          WORK="$(mktemp -d)"
+          gh release download preview-latest --repo "$GITHUB_REPOSITORY" \
+            --pattern 'MoviesTv-Flix-*' --dir "$WORK" --clobber
+
+          cd "$WORK"
+          FILES=()
+          take() {
+            if [ -f "$1" ]; then
+              cp "$1" "$2"
+              FILES+=("$2")
+            fi
+          }
+          take MoviesTv-Flix-ios-resignable-preview.ipa  "MoviesTv-Flix-${VERSION}-ios.ipa"
+          take MoviesTv-Flix-tvos-resignable-preview.ipa "MoviesTv-Flix-${VERSION}-tvos.ipa"
+          take MoviesTv-Flix-phone-preview.apk           "MoviesTv-Flix-${VERSION}-android.apk"
+          take MoviesTv-Flix-android-tv-preview.apk      "MoviesTv-Flix-${VERSION}-android-tv.apk"
+
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No packages were published for ${VERSION}; nothing to release." >&2
+            exit 1
+          fi
+          echo "Packages found: ${FILES[*]}"
+
+          {
+            echo 'Install packages for iPhone, iPad, Apple TV, Android phone and Android TV.'
+            echo
+            echo '| Device | File |'
+            echo '| --- | --- |'
+            echo '| iPhone / iPad | `-ios.ipa` |'
+            echo '| Apple TV | `-tvos.ipa` |'
+            echo '| Android phone / tablet | `-android.apk` |'
+            echo '| Android TV | `-android-tv.apk` |'
+            echo
+            echo 'The iOS and tvOS files are **unsigned**: sign them on the device with'
+            echo 'ESign, Feather or AltStore. A free Apple ID expires after 7 days.'
+            echo
+            echo 'The `preview-latest` release is the machine-readable update channel used'
+            echo 'by the in-app updater. Download from this versioned release instead.'
+          } > notes.md
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "MoviesTv-Flix ${VERSION}" --notes-file notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "MoviesTv-Flix ${VERSION}" --notes-file notes.md
+          fi
+
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "${FILES[@]}" --clobber
+          echo "Published ${TAG} with ${#FILES[@]} package(s)."

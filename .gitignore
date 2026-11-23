@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+coverage/
+dist/
+android/
+ios/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+apps/desktop-mac/build/

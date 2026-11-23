@@ -1,0 +1,27 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+/service-worker.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+/icon-192.png
+  Cache-Control: no-cache
+
+/icon-512.png
+  Cache-Control: no-cache
+
+
+/updates/latest.json
+  Cache-Control: no-store, max-age=0
+
+/updates/index.html
+  Cache-Control: no-cache
+
+/updates/
+  Cache-Control: no-cache

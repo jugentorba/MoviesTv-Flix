@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>MoviesTv-Flix</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.jugentorba.moviestvflix.mac</string>
+  <key>CFBundleName</key>
+  <string>MoviesTv-Flix</string>
+  <key>CFBundleDisplayName</key>
+  <string>MoviesTv-Flix</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <!--
+    No NSAllowsArbitraryLoads and no media exception: the wrapper plays https
+    provider sources and the local web build over http://localhost only, which
+    App Transport Security already permits.
+  -->
+</dict>
+</plist>

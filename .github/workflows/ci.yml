@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # Verify pull requests that can change runtime behaviour. Docs-only and
+    # asset-only PRs stay free so pushes do not spend Actions minutes.
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'worker/**'
+      - 'functions/**'
+      - 'supabase/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig*.json'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+# One run per pull request (or manual dispatch ref); a new push cancels the
+# previous run so the latest commit is what reports status.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test

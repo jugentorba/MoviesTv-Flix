@@ -1,0 +1,223 @@
+name: iOS re-signable preview
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Resolve native build number
+    runs-on: ubuntu-latest
+    outputs:
+      build_number: ${{ steps.native-build.outputs.build_number }}
+    steps:
+      - id: native-build
+        name: Allocate monotonic native build number
+        shell: bash
+        run: |
+          set -euo pipefail
+          now="$(date -u +%s)"
+          build_number="$((now - 1700000000))"
+          if [ "$build_number" -lt 1 ] || [ "$build_number" -gt 2100000000 ]; then
+            echo "Native build number is outside Android's supported range" >&2
+            exit 1
+          fi
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify Apple preview source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPO_PUBLIC_PREVIEW_MODE: "1"
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  build:
+    needs: [verify, metadata]
+    name: Build re-signable IPA
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      EXPO_TV: "0"
+      EXPO_PUBLIC_PREVIEW_MODE: "1"
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
+      EXPO_PUBLIC_APP_VERSION: ${{ vars.EXPO_PUBLIC_APP_VERSION || '0.1.0' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Select Xcode 26.5
+        run: sudo xcode-select -s "/Applications/Xcode_26.5.app/Contents/Developer"
+
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate native iOS project
+        run: pnpm --filter @moviestv/mobile-tv exec expo prebuild --platform ios --no-install
+
+      - name: Install CocoaPods
+        working-directory: apps/mobile-tv/ios
+        run: pod install
+
+      - name: Build unsigned device app
+        env:
+          NODE_ENV: production
+        run: |
+          set -euo pipefail
+          export EXPO_PUBLIC_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
+          IOS_DIR="$GITHUB_WORKSPACE/apps/mobile-tv/ios"
+          WORKSPACE="$(find "$IOS_DIR" -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          test -n "$WORKSPACE"
+
+          PROJECT="$(find "$IOS_DIR" -maxdepth 1 -type d -name '*.xcodeproj' ! -name 'Pods.xcodeproj' -print -quit)"
+          test -n "$PROJECT"
+          SCHEME_FILE="$(find "$PROJECT/xcshareddata/xcschemes" -maxdepth 1 -type f -name '*.xcscheme' -print -quit)"
+          test -n "$SCHEME_FILE"
+          SCHEME="$(basename "$SCHEME_FILE" .xcscheme)"
+          test -n "$SCHEME"
+
+          DERIVED="$RUNNER_TEMP/moviestv-ios-derived"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP="$(find "$DERIVED/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP"
+
+          mkdir -p artifacts/ios
+          bash scripts/package-ios-resignable.sh \
+            "$APP" \
+            artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa
+
+          bash scripts/verify-ios-resignable.sh \
+            artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa \
+            "$(git rev-parse --short=12 HEAD)"
+          (
+            cd artifacts/ios
+            shasum -a 256 MoviesTv-Flix-ios-resignable-preview.ipa > MoviesTv-Flix-ios-resignable-preview.ipa.sha256
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoviesTv-Flix-ios-resignable-preview
+          path: |
+            artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa
+            artifacts/ios/MoviesTv-Flix-ios-resignable-preview.ipa.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish latest iOS update
+    permissions:
+      contents: write
+    needs: [build, metadata]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: moviestv-preview-release-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APP_VERSION: ${{ vars.EXPO_PUBLIC_APP_VERSION || '0.1.0' }}
+      BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download built iOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: MoviesTv-Flix-ios-resignable-preview
+          path: release-assets
+
+      - name: Prepare persistent preview release
+        run: |
+          set -euo pipefail
+          TAG="preview-latest"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "MoviesTv-Flix latest preview" \
+              --notes "Latest preview packages used by the in-app updater."
+          else
+            gh release create "$TAG" \
+              --verify-tag \
+              --title "MoviesTv-Flix latest preview" \
+              --notes "Latest preview packages used by the in-app updater."
+          fi
+
+      - name: Build iOS update manifest
+        run: |
+          set -euo pipefail
+          TAG="preview-latest"
+          MANIFEST="$RUNNER_TEMP/MoviesTv-Flix-update-manifest.json"
+          mkdir -p "$RUNNER_TEMP/previous-manifest"
+
+          if gh release download "$TAG"             --pattern "MoviesTv-Flix-update-manifest.json"             --dir "$RUNNER_TEMP/previous-manifest" >/dev/null 2>&1; then
+            cp "$RUNNER_TEMP/previous-manifest/MoviesTv-Flix-update-manifest.json" "$MANIFEST"
+          else
+            cp apps/mobile-tv/public/updates/latest.json "$MANIFEST"
+          fi
+
+          IPA="$(find release-assets -maxdepth 2 -type f -name 'MoviesTv-Flix-ios-resignable-preview.ipa' -print -quit)"
+          test -n "$IPA"
+          IPA_SHA="$(sha256sum "$IPA" | awk '{print toupper($1)}')"
+
+          node apps/mobile-tv/scripts/write-update-manifest.mjs             --platform ios             --version "$APP_VERSION"             --build "$BUILD_NUMBER"             --url "https://main.moviestv-flix.pages.dev/api/app-update/ios.ipa"             --sha256 "$IPA_SHA"             --release-page "https://main.moviestv-flix.pages.dev/updates/"             --notes "Latest re-signable iPhone/iPad preview."             --output "$MANIFEST"
+
+          test -s "$MANIFEST"
+
+      - name: Publish iOS package and manifest
+        run: |
+          set -euo pipefail
+          TAG="preview-latest"
+          MANIFEST="$RUNNER_TEMP/MoviesTv-Flix-update-manifest.json"
+          mapfile -t FILES < <(find release-assets -maxdepth 2 -type f -print)
+          test "${#FILES[@]}" -gt 0
+          gh release upload "$TAG" "${FILES[@]}" "$MANIFEST" --clobber
+
+      - name: Sync PWA fallback update manifest
+        run: |
+          bash scripts/sync-update-manifest-to-main.sh             "$RUNNER_TEMP/MoviesTv-Flix-update-manifest.json"

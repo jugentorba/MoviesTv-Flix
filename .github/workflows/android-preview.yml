@@ -1,0 +1,297 @@
+name: Android preview APKs
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Android preview target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - phone
+          - android-tv
+  workflow_call:
+    inputs:
+      target:
+        required: false
+        default: all
+        type: string
+concurrency:
+  group: android-preview-${{ github.ref }}-${{ inputs.target || 'all' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Resolve native build number
+    runs-on: ubuntu-latest
+    outputs:
+      build_number: ${{ steps.native-build.outputs.build_number }}
+    steps:
+      - id: native-build
+        name: Allocate monotonic native build number
+        shell: bash
+        run: |
+          set -euo pipefail
+          now="$(date -u +%s)"
+          build_number="$((now - 1700000000))"
+          if [ "$build_number" -lt 1 ] || [ "$build_number" -gt 2100000000 ]; then
+            echo "Native build number is outside Android's supported range" >&2
+            exit 1
+          fi
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify Android preview source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      EXPO_PUBLIC_PREVIEW_MODE: "1"
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: python3 scripts/verify-android-preview-assets.py
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  build:
+    name: Build ${{ matrix.variant }} preview
+    needs: [verify, metadata]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EXPO_PUBLIC_PREVIEW_MODE: "1"
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      ANDROID_VERSION_CODE: ${{ needs.metadata.outputs.build_number }}
+      EXPO_PUBLIC_BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
+      EXPO_PUBLIC_APP_VERSION: ${{ vars.EXPO_PUBLIC_APP_VERSION || '0.1.0' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(inputs.target == 'phone' && '["phone"]' || inputs.target == 'android-tv' && '["android-tv"]' || '["phone","android-tv"]') }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate native Android project
+        env:
+          EXPO_TV: ${{ matrix.variant == 'android-tv' && '1' || '0' }}
+        run: pnpm --filter @moviestv/mobile-tv exec expo prebuild --platform android --no-install
+
+      - name: Verify generated Android TV manifest
+        if: matrix.variant == 'android-tv'
+        run: python3 scripts/verify-android-tv-manifest.py apps/mobile-tv/android/app/src/main/AndroidManifest.xml
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('apps/mobile-tv/android/**/*.gradle*', 'apps/mobile-tv/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            android-gradle-${{ runner.os }}-
+
+      - name: Configure Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          echo "sdk.dir=$SDK_ROOT" > apps/mobile-tv/android/local.properties
+
+      - name: Build self-contained release APK
+        working-directory: apps/mobile-tv/android
+        env:
+          NODE_ENV: production
+        run: |
+          export EXPO_PUBLIC_BUILD_SHA="$(git rev-parse --short=12 HEAD)"
+          ./gradlew assembleRelease --no-daemon --build-cache
+
+      - name: Sign and verify preview APK
+        run: |
+          set -euo pipefail
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+
+          APK_PATH="$(find apps/mobile-tv/android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$APK_PATH"
+
+          BUILD_TOOLS="$(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          test -x "$APKSIGNER"
+          test -x "$ZIPALIGN"
+
+          mkdir -p artifacts
+          KEYSTORE="$GITHUB_WORKSPACE/.github/keys/moviestv-preview.jks"
+          ALIGNED="$RUNNER_TEMP/moviestv-preview-${{ matrix.variant }}-aligned.apk"
+          FINAL="$GITHUB_WORKSPACE/artifacts/MoviesTv-Flix-${{ matrix.variant }}-preview.apk"
+
+          "$ZIPALIGN" -P 16 -f 4 "$APK_PATH" "$ALIGNED"
+
+          # The preview keystore is not part of the public repository: it is a
+          # signing identity. Without it this job still publishes the built APK,
+          # unsigned, and says so instead of failing.
+          if [ -f "$KEYSTORE" ]; then
+            "$APKSIGNER" sign \
+              --ks "$KEYSTORE" \
+              --ks-key-alias moviestv-preview \
+              --ks-pass pass:previewpass \
+              --key-pass pass:previewpass \
+              --out "$FINAL" \
+              "$ALIGNED"
+          else
+            echo "note: preview keystore absent; publishing an unsigned APK"
+            cp "$ALIGNED" "$FINAL"
+          fi
+
+          rm -f "$ALIGNED"
+          TARGET="${{ matrix.variant == 'android-tv' && 'tv' || 'phone' }}"
+          bash scripts/verify-android-preview.sh \
+            "$FINAL" \
+            "$TARGET" \
+            "$(git rev-parse --short=12 HEAD)" \
+            "0FD5A50BBEE30D1D3BBC7F1B5DDEE351A70C0F7BDA7F99EA17590F9311422D1D" \
+            "$ANDROID_VERSION_CODE"
+          "$APKSIGNER" verify --print-certs "$FINAL" > "$FINAL.signing.txt"
+          (
+            cd "$(dirname "$FINAL")"
+            sha256sum "$(basename "$FINAL")" > "$(basename "$FINAL").sha256"
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoviesTv-Flix-${{ matrix.variant }}-preview
+          path: |
+            artifacts/MoviesTv-Flix-${{ matrix.variant }}-preview.apk
+            artifacts/MoviesTv-Flix-${{ matrix.variant }}-preview.apk.sha256
+            artifacts/MoviesTv-Flix-${{ matrix.variant }}-preview.apk.signing.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish latest Android update
+    permissions:
+      contents: write
+    needs: [build, metadata]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: moviestv-preview-release-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APP_VERSION: ${{ vars.EXPO_PUBLIC_APP_VERSION || '0.1.0' }}
+      BUILD_NUMBER: ${{ needs.metadata.outputs.build_number }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download phone artifact
+        if: inputs.target != 'android-tv'
+        uses: actions/download-artifact@v4
+        with:
+          name: MoviesTv-Flix-phone-preview
+          path: release-assets
+
+      - name: Download Android TV artifact
+        if: inputs.target != 'phone'
+        uses: actions/download-artifact@v4
+        with:
+          name: MoviesTv-Flix-android-tv-preview
+          path: release-assets
+
+      - name: Prepare persistent preview release
+        run: |
+          set -euo pipefail
+          TAG="preview-latest"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "MoviesTv-Flix latest preview" \
+              --notes "Latest preview packages used by the in-app updater."
+          else
+            gh release create "$TAG" \
+              --verify-tag \
+              --title "MoviesTv-Flix latest preview" \
+              --notes "Latest preview packages used by the in-app updater."
+          fi
+
+      - name: Build Android update manifest
+        run: |
+          set -euo pipefail
+          TAG="preview-latest"
+          MANIFEST="$RUNNER_TEMP/MoviesTv-Flix-update-manifest.json"
+          mkdir -p "$RUNNER_TEMP/previous-manifest"
+
+          if gh release download "$TAG"             --pattern "MoviesTv-Flix-update-manifest.json"             --dir "$RUNNER_TEMP/previous-manifest" >/dev/null 2>&1; then
+            cp "$RUNNER_TEMP/previous-manifest/MoviesTv-Flix-update-manifest.json" "$MANIFEST"
+          else
+            cp apps/mobile-tv/public/updates/latest.json "$MANIFEST"
+          fi
+
+          PHONE="$(find release-assets -type f -name 'MoviesTv-Flix-phone-preview.apk' -print -quit)"
+          if [ -n "$PHONE" ]; then
+            PHONE_SHA="$(sha256sum "$PHONE" | awk '{print toupper($1)}')"
+            node apps/mobile-tv/scripts/write-update-manifest.mjs               --platform android               --version "$APP_VERSION"               --build "$BUILD_NUMBER"               --url "https://main.moviestv-flix.pages.dev/api/app-update/android.apk"               --sha256 "$PHONE_SHA"               --release-page "https://main.moviestv-flix.pages.dev/updates/"               --notes "Latest signed Android phone preview."               --output "$MANIFEST"
+          fi
+
+          TV="$(find release-assets -type f -name 'MoviesTv-Flix-android-tv-preview.apk' -print -quit)"
+          if [ -n "$TV" ]; then
+            TV_SHA="$(sha256sum "$TV" | awk '{print toupper($1)}')"
+            node apps/mobile-tv/scripts/write-update-manifest.mjs               --platform android-tv               --version "$APP_VERSION"               --build "$BUILD_NUMBER"               --url "https://main.moviestv-flix.pages.dev/api/app-update/android-tv.apk"               --sha256 "$TV_SHA"               --release-page "https://main.moviestv-flix.pages.dev/updates/"               --notes "Latest signed Android TV preview."               --output "$MANIFEST"
+          fi
+
+          test -s "$MANIFEST"
+
+      - name: Publish Android packages and manifest
+        run: |
+          set -euo pipefail
+          TAG="preview-latest"
+          MANIFEST="$RUNNER_TEMP/MoviesTv-Flix-update-manifest.json"
+          mapfile -t FILES < <(find release-assets -maxdepth 2 -type f -print)
+          test "${#FILES[@]}" -gt 0
+          gh release upload "$TAG" "${FILES[@]}" "$MANIFEST" --clobber
+
+      - name: Sync PWA fallback update manifest
+        run: |
+          bash scripts/sync-update-manifest-to-main.sh             "$RUNNER_TEMP/MoviesTv-Flix-update-manifest.json"

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "channel": "preview",
+  "android": {
+    "version": "0.2.9",
+    "build": 95121431,
+    "sha256": "41ACDBDBE95287E9EAC6FD84999AECAC05E966B03559C8F47D8677ACB55A8473",
+    "packageName": "com.jugentorba.moviestvflix",
+    "signingCertificateSha256": "0FD5A50BBEE30D1D3BBC7F1B5DDEE351A70C0F7BDA7F99EA17590F9311422D1D",
+    "releaseNotes": "Latest signed Android phone preview."
+  },
+  "androidTv": {
+    "version": "0.2.9",
+    "build": 95121431,
+    "sha256": "14817C9A86ED9239FBB5E2ED9E71809446860C5B23BDD4C63BD31D3C12154C97",
+    "packageName": "com.jugentorba.moviestvflix",
+    "signingCertificateSha256": "0FD5A50BBEE30D1D3BBC7F1B5DDEE351A70C0F7BDA7F99EA17590F9311422D1D",
+    "releaseNotes": "Latest signed Android TV preview."
+  },
+  "ios": {
+    "version": "0.2.9",
+    "build": 95121431,
+    "sha256": "2908160E5EBFEB476852D902BDD5035A3DC84DD2F528B5B62A94617F9D33D47B",
+    "bundleIdentifier": "com.jugentorba.moviestvflix",
+    "resignable": true,
+    "releaseNotes": "Latest re-signable iPhone/iPad preview."
+  },
+  "tvos": {
+    "version": "0.2.9",
+    "build": 95121431,
+    "sha256": "21B1FF24CB1E8F1EB23F4F589B388575643E3F103E27A5700216E371DA71F881",
+    "bundleIdentifier": "com.jugentorba.moviestvflix",
+    "resignable": true,
+    "releaseNotes": "Latest re-signable Apple TV preview."
+  }
+}

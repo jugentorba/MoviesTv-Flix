@@ -1,0 +1,65 @@
+{
+  "name": "@moviestv/mobile-tv",
+  "version": "0.7.3",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "EXPO_NO_METRO_WORKSPACE_ROOT=1 expo start",
+    "test": "jest --runInBand && node scripts/__tests__/stamp-service-worker.test.mjs && node scripts/__tests__/verify-web-export.test.mjs && node scripts/__tests__/service-worker-lifecycle.test.mjs && node scripts/__tests__/service-worker-routing.test.mjs && node scripts/__tests__/cloudflare-runtime.test.mjs && node scripts/__tests__/preview-verifier-contract.test.mjs && node scripts/__tests__/workspace-dependency-contract.test.mjs && node scripts/__tests__/write-update-manifest.test.mjs && node scripts/__tests__/android-preview-updater-plugin.test.mjs && node scripts/__tests__/android-vlc-jni-plugin.test.mjs && node scripts/__tests__/android-gradle-wrapper-plugin.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "export:web": "EXPO_NO_METRO_WORKSPACE_ROOT=1 expo export --platform web --output-dir dist && node scripts/stamp-service-worker.mjs dist",
+    "verify:web": "node scripts/verify-web-export.mjs dist",
+    "release:update-manifest": "node scripts/write-update-manifest.mjs"
+  },
+  "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/sora": "^0.4.2",
+    "@expo/metro-runtime": "56.0.21",
+    "@expo/vector-icons": "^15.1.1",
+    "@lunarr/vlc-player": "2.1.1",
+    "@moviestv/addons": "workspace:*",
+    "@moviestv/auth": "workspace:*",
+    "@moviestv/catalog": "workspace:*",
+    "@moviestv/core": "workspace:*",
+    "@moviestv/live-tv": "workspace:*",
+    "@moviestv/playback": "workspace:*",
+    "@moviestv/storage": "workspace:*",
+    "@moviestv/sync": "workspace:*",
+    "@moviestv/ui": "workspace:*",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-navigation/bottom-tabs": "^7.4.7",
+    "@react-navigation/native": "^7.1.17",
+    "@supabase/supabase-js": "^2.57.4",
+    "expo": "^56.0.0",
+    "expo-brightness": "~56.0.5",
+    "expo-constants": "^56.0.24",
+    "expo-file-system": "~56.0.11",
+    "expo-font": "~56.0.7",
+    "expo-linear-gradient": "~56.0.4",
+    "expo-screen-orientation": "~56.0.5",
+    "expo-secure-store": "~56.0.4",
+    "expo-video": "~56.1.4",
+    "hls.js": "1.7.3",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "npm:react-native-tvos@0.85-stable",
+    "react-native-safe-area-context": "^5.7.0",
+    "react-native-screens": "^4.26.0",
+    "react-native-web": "^0.21.2"
+  },
+  "devDependencies": {
+    "@react-native-tvos/config-tv": "^0.1.6",
+    "@testing-library/react-native": "^13.3.3",
+    "@types/react": "^19.2.0",
+    "babel-preset-expo": "56.0.20",
+    "jest-expo": "^56.0.5",
+    "react-test-renderer": "19.2.3"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native"
+      ]
+    }
+  }
+}
