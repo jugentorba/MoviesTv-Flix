@@ -18,6 +18,12 @@ export interface AccountApi {
   /** Leaves the "choose a new password" screen. */
   finishRecovery?(): void;
   passwordRecovery?: boolean;
+  /** Re-authenticates, then sets a new password for a signed-in account. */
+  changePassword?(currentPassword: string, newPassword: string): Promise<boolean>;
+  /** Revokes every session of the account. */
+  signOutEverywhere?(): Promise<boolean>;
+  /** Address of the signed-in account, for display only. */
+  email?: string;
 }
 
 export const AccountContext = createContext<AccountApi | null>(null);

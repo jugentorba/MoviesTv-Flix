@@ -418,3 +418,56 @@ test('a mismatched confirmation never reaches the backend', async () => {
   expect(updatePassword).not.toHaveBeenCalled();
   expect(screen.getByTestId('account-password-error')).toBeTruthy();
 });
+
+test('signed-in account shows a masked address instead of the raw user id', () => {
+  renderAccount(guest({
+    userId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+    email: 'jugen@example.com',
+  }), 'en');
+
+  expect(screen.getByText('j***@example.com')).toBeTruthy();
+  expect(screen.queryByText('f47ac10b-58cc-4372-a567-0e02b2c3d479')).toBeNull();
+});
+
+test('changing a password re-authenticates and confirms', async () => {
+  const changePassword = jest.fn(async () => true);
+  renderAccount(guest({ userId: 'user-1', changePassword }), 'en');
+
+  fireEvent.press(screen.getByTestId('account-change-password-open'));
+  fireEvent.changeText(screen.getByTestId('account-current-password'), 'oldpass1');
+  fireEvent.changeText(screen.getByTestId('account-change-password-new'), 'newpass12');
+  fireEvent.changeText(screen.getByTestId('account-change-password-confirm'), 'newpass12');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('account-change-password-save'));
+  });
+
+  expect(changePassword).toHaveBeenCalledWith('oldpass1', 'newpass12');
+  expect(screen.getByTestId('account-change-password-done')).toBeTruthy();
+});
+
+test('a weak new password is refused before reaching the backend', async () => {
+  const changePassword = jest.fn(async () => true);
+  renderAccount(guest({ userId: 'user-1', changePassword }), 'en');
+
+  fireEvent.press(screen.getByTestId('account-change-password-open'));
+  fireEvent.changeText(screen.getByTestId('account-current-password'), 'oldpass1');
+  fireEvent.changeText(screen.getByTestId('account-change-password-new'), 'password');
+  fireEvent.changeText(screen.getByTestId('account-change-password-confirm'), 'password');
+  await act(async () => {
+    fireEvent.press(screen.getByTestId('account-change-password-save'));
+  });
+
+  expect(changePassword).not.toHaveBeenCalled();
+  expect(screen.getByTestId('account-change-password-error')).toBeTruthy();
+});
+
+test('sign out everywhere needs a second tap', async () => {
+  const signOutEverywhere = jest.fn(async () => true);
+  renderAccount(guest({ userId: 'user-1', signOutEverywhere }), 'en');
+
+  fireEvent.press(screen.getByTestId('account-sign-out-everywhere'));
+  expect(signOutEverywhere).not.toHaveBeenCalled();
+
+  fireEvent.press(screen.getByTestId('account-sign-out-everywhere'));
+  expect(signOutEverywhere).toHaveBeenCalled();
+});

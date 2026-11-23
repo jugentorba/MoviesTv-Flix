@@ -9,10 +9,9 @@ new proof.
 ## Snapshot
 
 - Audit date: **2026-11-22**
-- Latest release: **v0.7.4**, built from `main` with all three assets: iOS IPA
-  (31.0 MB), Android APK (84.1 MB, versionCode 20261161) and the macOS DMG
-  (6.2 MB, self-contained). Includes email-confirmation states, password
-  recovery and the desktop self-updater.
+- Latest release: **v0.7.5**, all three assets: iOS IPA (31.0 MB), Android APK
+  (84.1 MB, versionCode 20261162) and the macOS DMG (6.2 MB). Adds the account
+  hardening (password rule, verified change, sign-out everywhere, masked address).
 - **The repository is public** (since 2026-11-23). The public tree is a clean
   snapshot: the pre-0.7.3 history lives in the private `MoviesTv-Flix-archive`
   repository, and the preview signing keystore is not published. Anonymous
@@ -24,17 +23,17 @@ new proof.
   and measured: first paint **2,599–2,626 ms**, down from 12,356 ms, with the
   Home header no longer overlapping the first row (`headerBottom 46`,
   `titleTop 76`).
-- **macOS self-update — Verified now (device)**: running `--install-update` with
-  the published v0.7.4 DMG downloaded it, replaced `/Applications/MoviesTv-Flix.app`
-  and relaunched; `CFBundleShortVersionString` read back as 0.7.4 afterwards.
-- **macOS 0.7.4 — Verified now (device)**: installed at `/Applications/MoviesTv-Flix.app`,
+- **macOS self-update — Verified now (device)**: with 0.7.4 installed, running
+  `--install-update` against the published **0.7.5** DMG downloaded it, replaced
+  `/Applications/MoviesTv-Flix.app` and relaunched; the bundle then read **0.7.5**
+  — a real version change, not a reinstall of the same build.
+- **macOS 0.7.5 — Verified now (device)**: installed at `/Applications/MoviesTv-Flix.app`,
   bundles its own web export, signed in against the live backend and listed the
   four providers synced from the phone plus Continue Watching progress
   ("The Odyssey, 7% · 12 min"). First paint 2,599–2,626 ms after the font-gate
   fix. Playing a real provider stream is still untested on this build.
-- **iPhone 17 Pro Max — 0.7.3 (build 20261160) installed**; the 0.7.4 device install
-  was refused with `CoreDeviceError 4016` because the phone was locked/unreachable,
-  so it is pending, not failing
+- **iPhone 17 Pro Max — Verified now (device)**: 0.7.5 (build 20261162) installed
+  over `devicectl` under `app.grape2354.valley804`
   over `devicectl` and launched (`MoviesTvFlix` process running) on 2026-11-22.
   It is signed with the distribution certificate in the login keychain and the
   only Ad Hoc profile available, which names `app.grape2354.valley804`; it
@@ -515,6 +514,23 @@ local merge of `main` into the branch, not on a device.
    current DMG is ad-hoc signed and needs right-click → Open.
 
 ## Session log
+
+### 2026-11-23 (0.7.5 shipped, updater proven)
+- Password rule 8–72 with a letter and a number; change requires the current
+  password; sign-out-everywhere revokes all refresh tokens; masked address.
+- The macOS updater performed a real version change: 0.7.4 → 0.7.5 from the
+  published DMG, verified by reading the bundle version afterwards.
+- Build fix: strip extended attributes before `codesign`, which otherwise
+  refuses the bundled web export ("resource fork … not allowed").
+- iPhone 0.7.5 installed once the device was reachable.
+
+### 2026-11-23 (account security)
+- Passwords are 8–72 characters with a letter and a number on sign-up, recovery
+  and change; sign-in still accepts older passwords.
+- Change password re-authenticates with the current one first; Sign out everywhere
+  revokes every refresh token. The account screen shows a masked address.
+- Dashboard checklist (min length, leaked-password protection, rate limits,
+  redirect URLs) is in `docs/builds/supabase-project.md`.
 
 ### 2026-11-23 (0.7.4: accounts and updates verified)
 - Sign-up shows a confirmation state instead of signing in; forgot-password and

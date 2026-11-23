@@ -213,3 +213,39 @@ test('sign out only ends the current Supabase session', async () => {
   await expect(auth.signOut()).resolves.toBeUndefined();
   expect(signOut).toHaveBeenCalledWith({ scope: 'local' });
 });
+
+test('changing a password re-authenticates before updating it', async () => {
+  const getUser = jest.fn(async () => ({ data: { user: { email: 'user@example.com' } }, error: null }));
+  const signInWithPassword = jest.fn(async () => ({ data: {}, error: null }));
+  const updateUser = jest.fn(async () => ({ data: {}, error: null }));
+  const client = { auth: { getUser, signInWithPassword, updateUser } } as unknown as SupabaseClient;
+  const auth = new SupabaseAuthClient(client);
+
+  await auth.changePassword('oldpass1', 'newpass12');
+
+  expect(signInWithPassword).toHaveBeenCalledWith({
+    email: 'user@example.com',
+    password: 'oldpass1',
+  });
+  expect(updateUser).toHaveBeenCalledWith({ password: 'newpass12' });
+});
+
+test('a wrong current password never reaches updateUser', async () => {
+  const getUser = jest.fn(async () => ({ data: { user: { email: 'user@example.com' } }, error: null }));
+  const signInWithPassword = jest.fn(async () => ({ data: {}, error: new Error('invalid') }));
+  const updateUser = jest.fn(async () => ({ data: {}, error: null }));
+  const client = { auth: { getUser, signInWithPassword, updateUser } } as unknown as SupabaseClient;
+  const auth = new SupabaseAuthClient(client);
+
+  await expect(auth.changePassword('wrong', 'newpass12')).rejects.toThrow();
+  expect(updateUser).not.toHaveBeenCalled();
+});
+
+test('sign out everywhere uses the global scope', async () => {
+  const signOut = jest.fn(async () => ({ error: null }));
+  const client = { auth: { signOut } } as unknown as SupabaseClient;
+  const auth = new SupabaseAuthClient(client);
+
+  await auth.signOutEverywhere();
+  expect(signOut).toHaveBeenCalledWith({ scope: 'global' });
+});

@@ -7,6 +7,8 @@ import { IconBackButton } from '../components/IconBackButton';
 import { useSwipeBack } from '../components/useSwipeBack';
 import { safeInsetEdge } from '../app/safeAreaLayout';
 import { useAccount } from './useAccount';
+import { maskEmail } from './maskEmail';
+import { passwordProblem, signInPasswordValid } from './passwordPolicy';
 import { markWelcomeSeen } from './firstRun';
 import { useTheme, useThemeStyles } from '../theme/ThemeProvider';
 
@@ -128,15 +130,29 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordUpdated, setPasswordUpdated] = useState(false);
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [changeError, setChangeError] = useState<string | null>(null);
+  const [changeDone, setChangeDone] = useState(false);
+  const [signOutArmed, setSignOutArmed] = useState(false);
   const normalizedEmail = email.trim().toLowerCase();
   // The buttons stay tappable; the requirement is explained on press instead of
   // the control refusing silently, which is what made "Create account" look dead.
   const canSubmit = !account.loading && !submitting && !configuring;
-  const validate = (): string | null => {
+  const policyMessage = (): string | null => {
+    const problem = passwordProblem(password);
+    if (!problem) return null;
+    if (problem === 'too-short') return t('account.passwordTooShort');
+    if (problem === 'too-long') return t('account.passwordTooLong');
+    if (problem === 'needs-letter') return t('account.passwordNeedsLetter');
+    return t('account.passwordNeedsNumber');
+  };
+  const validate = (policy: 'signIn' | 'create'): string | null => {
     if (!validAccountEmail(normalizedEmail)) return t('account.emailInvalid');
-    if (password.length < 6) return t('account.passwordTooShort');
-    if (password.length > 1024) return t('account.passwordTooLong');
-    return null;
+    if (policy === 'signIn') {
+      return signInPasswordValid(password) ? null : t('account.passwordTooShort');
+    }
+    return policyMessage();
   };
   React.useEffect(() => {
     if (account.userId?.trim()) void markWelcomeSeen();
@@ -196,7 +212,7 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
   };
   const submitSignIn = async () => {
     if (!canSubmit) return;
-    const problem = validate();
+    const problem = validate('signIn');
     setFormError(problem);
     if (problem) return;
     setSubmitting(true);
@@ -211,7 +227,7 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
   };
   const submitSignUp = async () => {
     if (!canSubmit) return;
-    const problem = validate();
+    const problem = validate('create');
     setFormError(problem);
     if (problem) return;
     setSubmitting(true);
@@ -222,6 +238,37 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
       setPassword('');
       setSubmitting(false);
       setBusyAction(null);
+    }
+  };
+
+  const submitChangePassword = async () => {
+    if (!canSubmit) return;
+    if (!signInPasswordValid(currentPassword)) {
+      setChangeError(t('account.currentPassword'));
+      return;
+    }
+    const policy = policyMessage();
+    if (policy) {
+      setChangeError(policy);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setChangeError(t('account.passwordMismatch'));
+      return;
+    }
+    setChangeError(null);
+    setChangeDone(false);
+    setSubmitting(true);
+    try {
+      const changed = await account.changePassword?.(currentPassword, password) ?? false;
+      if (changed) {
+        setChangeDone(true);
+        setCurrentPassword('');
+        setPassword('');
+        setConfirmPassword('');
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -247,8 +294,9 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
 
   const submitNewPassword = async () => {
     if (!canSubmit) return;
-    if (password.length < 6) {
-      setPasswordError(t('account.passwordTooShort'));
+    const policy = policyMessage();
+    if (policy) {
+      setPasswordError(policy);
       return;
     }
     if (password !== confirmPassword) {
@@ -320,7 +368,9 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
               : t('account.backendMissing')}
         </Text>
         {account.userId?.trim() ? (
-          <Text numberOfLines={1} style={styles.userId}>{account.userId.trim()}</Text>
+          <Text numberOfLines={1} style={styles.userId}>
+            {maskEmail(account.email) ?? account.userId.trim()}
+          </Text>
         ) : (
           <ActionButton
             label={t('account.continueAsGuest')}
@@ -443,12 +493,121 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
       ) : null}
 
       {account.userId?.trim() ? (
-        <ActionButton
-          label={t('account.signOut')}
-          onPress={() => { clearCredentials(); void account.signOut(); }}
-          disabled={account.loading}
-          testID="account-sign-out"
-        />
+        <View style={styles.form} testID="account-signed-in">
+          <ActionButton
+            label={t('account.signOut')}
+            onPress={() => { clearCredentials(); void account.signOut(); }}
+            disabled={account.loading}
+            testID="account-sign-out"
+          />
+          {account.changePassword ? (
+            changeOpen ? (
+              <View style={styles.form} testID="account-change-password">
+                <Text style={styles.formTitle}>{t('account.changePasswordTitle')}</Text>
+                <TextInput
+                  testID="account-current-password"
+                  accessibilityLabel={t('account.currentPassword')}
+                  value={currentPassword}
+                  onChangeText={(value) => setCurrentPassword(value.slice(0, 1024))}
+                  placeholder={t('account.currentPassword')}
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="current-password"
+                  textContentType="password"
+                  maxLength={1024}
+                  secureTextEntry
+                  style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
+                />
+                <TextInput
+                  testID="account-change-password-new"
+                  accessibilityLabel={t('account.password')}
+                  value={password}
+                  onChangeText={(value) => setPassword(value.slice(0, 1024))}
+                  placeholder={t('account.password')}
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="new-password"
+                  textContentType="newPassword"
+                  maxLength={1024}
+                  secureTextEntry
+                  style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
+                />
+                <TextInput
+                  testID="account-change-password-confirm"
+                  accessibilityLabel={t('account.newPasswordConfirm')}
+                  value={confirmPassword}
+                  onChangeText={(value) => setConfirmPassword(value.slice(0, 1024))}
+                  placeholder={t('account.newPasswordConfirm')}
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="new-password"
+                  textContentType="newPassword"
+                  maxLength={1024}
+                  secureTextEntry
+                  style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
+                />
+                <Text style={[styles.hint, { writingDirection: direction }]}>
+                  {t('account.passwordHint')}
+                </Text>
+                {changeError ? (
+                  <Text accessibilityRole="alert" testID="account-change-password-error" style={styles.fieldError}>
+                    {changeError}
+                  </Text>
+                ) : null}
+                {changeDone ? (
+                  <Text testID="account-change-password-done" style={[styles.message, { writingDirection: direction }]}>
+                    {t('account.passwordChanged')}
+                  </Text>
+                ) : null}
+                <ActionButton
+                  label={t('account.changePasswordAction')}
+                  primary
+                  disabled={!canSubmit}
+                  testID="account-change-password-save"
+                  onPress={() => { void submitChangePassword(); }}
+                />
+                <ActionButton
+                  label={t('account.backToSignIn')}
+                  testID="account-change-password-cancel"
+                  onPress={() => {
+                    setChangeOpen(false);
+                    setChangeError(null);
+                    setCurrentPassword('');
+                    setPassword('');
+                    setConfirmPassword('');
+                  }}
+                />
+              </View>
+            ) : (
+              <ActionButton
+                label={t('account.changePasswordTitle')}
+                testID="account-change-password-open"
+                onPress={() => { setChangeOpen(true); setChangeDone(false); }}
+                disabled={account.loading}
+              />
+            )
+          ) : null}
+          {account.signOutEverywhere ? (
+            <ActionButton
+              label={signOutArmed
+                ? t('account.signOutEverywhereConfirm')
+                : t('account.signOutEverywhere')}
+              testID="account-sign-out-everywhere"
+              disabled={account.loading}
+              onPress={() => {
+                if (!signOutArmed) {
+                  setSignOutArmed(true);
+                  return;
+                }
+                setSignOutArmed(false);
+                void account.signOutEverywhere?.();
+              }}
+            />
+          ) : null}
+        </View>
       ) : account.backendAvailable ? (
         <View style={styles.form}>
           {account.passwordRecovery ? (
@@ -485,6 +644,9 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
                 secureTextEntry
                 style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
               />
+              <Text style={[styles.hint, { writingDirection: direction }]}>
+                {t('account.passwordHint')}
+              </Text>
               {passwordError ? (
                 <Text accessibilityRole="alert" testID="account-password-error" style={styles.fieldError}>
                   {passwordError}
@@ -583,6 +745,9 @@ export function AccountScreen({ onBack }: { onBack(): void }) {
             onSubmitEditing={() => { if (canSubmit) void submitSignIn(); }}
             style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left' }]}
           />
+          <Text style={[styles.hint, { writingDirection: direction }]}>
+            {t('account.passwordHint')}
+          </Text>
           {formError ? (
             <Text accessibilityRole="alert" testID="account-form-error" style={styles.fieldError}>
               {formError}
@@ -662,6 +827,7 @@ const createStyles = (theme: Theme) => StyleSheet.create({
   statusBody: { color: theme.colors.muted, fontSize: 14, lineHeight: 21 },
   userId: { color: theme.colors.muted, fontSize: 10, marginTop: 4 },
   form: { gap: theme.spacing.md },
+  hint: { color: theme.colors.subtle, fontSize: 11, lineHeight: 16 },
   forgot: { alignSelf: 'flex-start', paddingVertical: 6 },
   forgotText: { color: theme.colors.accentSoft, fontSize: 13, fontWeight: '600' },
   formTitle: { color: theme.colors.text, fontSize: 15, fontWeight: '800' },

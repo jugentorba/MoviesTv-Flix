@@ -5,6 +5,7 @@ import type {
   AuthIdentity,
 } from '@moviestv/auth';
 import { safeAuthErrorMessage } from './authError';
+import { passwordProblem, signInPasswordValid } from './passwordPolicy';
 import { authLinkType, parseRecoveryTokens } from './recoveryLink';
 
 /** Where Supabase should send the user after they follow an email link. */
@@ -36,7 +37,11 @@ function identityOf(
     || userId.length > 512
     || /[\u0000-\u001f\u007f]/.test(userId)
   ) return null;
-  return { userId };
+  const email = session.email?.trim();
+  return {
+    userId,
+    ...(email ? { email } : {}),
+  };
 }
 
 export function useAuthSession(client: AuthClient) {
@@ -141,11 +146,7 @@ export function useAuthSession(client: AuthClient) {
     email: string,
     password: string,
   ) => {
-    if (
-      !validEmail(email)
-      || password.length < 6
-      || password.length > 1024
-    ) {
+    if (!validEmail(email) || !signInPasswordValid(password)) {
       setMessage('Invalid email or password.');
       return;
     }
@@ -176,11 +177,7 @@ export function useAuthSession(client: AuthClient) {
     email: string,
     password: string,
   ) => {
-    if (
-      !validEmail(email)
-      || password.length < 6
-      || password.length > 1024
-    ) {
+    if (!validEmail(email) || passwordProblem(password)) {
       setMessage('Invalid email or password.');
       return;
     }
@@ -243,7 +240,7 @@ export function useAuthSession(client: AuthClient) {
 
   const updatePassword = useCallback(async (password: string) => {
     if (!client.updatePassword) return false;
-    if (password.length < 6 || password.length > 1024) {
+    if (passwordProblem(password)) {
       setMessage('Invalid email or password.');
       return false;
     }
@@ -255,6 +252,56 @@ export function useAuthSession(client: AuthClient) {
       await client.updatePassword(password);
       if (operation !== operationRef.current) return false;
       setPasswordRecovery(false);
+      return true;
+    } catch (error) {
+      if (operation === operationRef.current) {
+        setMessage(safeAuthErrorMessage(error));
+      }
+      return false;
+    } finally {
+      if (operation === operationRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [client]);
+
+  const changePassword = useCallback(async (
+    currentPassword: string,
+    newPassword: string,
+  ) => {
+    if (!client.changePassword) return false;
+    if (!signInPasswordValid(currentPassword) || passwordProblem(newPassword)) {
+      setMessage('Invalid email or password.');
+      return false;
+    }
+    const operation = ++operationRef.current;
+    setLoading(true);
+    setMessage(undefined);
+    try {
+      await client.changePassword(currentPassword, newPassword);
+      if (operation !== operationRef.current) return false;
+      return true;
+    } catch (error) {
+      if (operation === operationRef.current) {
+        setMessage(safeAuthErrorMessage(error));
+      }
+      return false;
+    } finally {
+      if (operation === operationRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [client]);
+
+  const signOutEverywhere = useCallback(async () => {
+    if (!client.signOutEverywhere) return false;
+    const operation = ++operationRef.current;
+    setLoading(true);
+    try {
+      await client.signOutEverywhere();
+      if (operation !== operationRef.current) return false;
+      setSession(null);
+      setMessage(undefined);
       return true;
     } catch (error) {
       if (operation === operationRef.current) {
@@ -305,5 +352,7 @@ export function useAuthSession(client: AuthClient) {
     updatePassword,
     finishRecovery,
     passwordRecovery,
+    changePassword,
+    signOutEverywhere,
   };
 }

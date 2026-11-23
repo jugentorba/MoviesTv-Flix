@@ -104,6 +104,10 @@ if [ -n "$VERSION" ]; then
   echo "version $VERSION"
 fi
 
+# The web export can carry Finder/Provenance attributes; codesign refuses a
+# bundle that contains them ("resource fork ... not allowed").
+xattr -cr "$BUNDLE" 2>/dev/null || true
+
 # Ad-hoc signature: enough to run locally. Distribution needs a Developer ID.
 codesign --force --deep --sign - "$BUNDLE" >/dev/null
 

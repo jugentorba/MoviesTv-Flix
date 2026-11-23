@@ -39,13 +39,20 @@ async function withAuthTimeout<T>(
 }
 
 function sessionOf(session: {
-  user?: { id?: string };
+  user?: { id?: string; email?: string };
   access_token?: string;
   refresh_token?: string;
 } | null | undefined): AuthSession | null {
   if (!session) return null;
 
   const userId = session.user?.id?.trim();
+  const rawEmail = session.user?.email?.trim();
+  const email = rawEmail
+    && rawEmail.length <= 320
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)
+    && !/[\u0000-\u001f\u007f]/.test(rawEmail)
+    ? rawEmail
+    : undefined;
   const accessToken = session.access_token?.trim();
   const refreshToken = session.refresh_token?.trim();
   if (
@@ -59,6 +66,7 @@ function sessionOf(session: {
 
   return {
     userId,
+    ...(email ? { email } : {}),
     accessToken,
     ...(refreshToken ? { refreshToken } : {}),
   };
@@ -146,6 +154,39 @@ export class SupabaseAuthClient implements AuthClient {
     if (error) throw error;
     const session = sessionOf(data.session);
     return session ? { userId: session.userId } : null;
+  }
+
+  async changePassword(currentPassword: string, newPassword: string) {
+    // updateUser does not verify the old password, so re-authenticate first:
+    // a stolen device with an unlocked session must still not change the
+    // password without knowing it.
+    const { data, error: userError } = await withAuthTimeout(
+      () => this.client.auth.getUser(),
+      this.timeoutMs,
+    );
+    if (userError) throw userError;
+    const email = data.user?.email?.trim();
+    if (!email) throw new Error('Account email is unavailable');
+
+    const { error: verifyError } = await withAuthTimeout(
+      () => this.client.auth.signInWithPassword({ email, password: currentPassword }),
+      this.timeoutMs,
+    );
+    if (verifyError) throw verifyError;
+
+    const { error } = await withAuthTimeout(
+      () => this.client.auth.updateUser({ password: newPassword }),
+      this.timeoutMs,
+    );
+    if (error) throw error;
+  }
+
+  async signOutEverywhere() {
+    const { error } = await withAuthTimeout(
+      () => this.client.auth.signOut({ scope: 'global' }),
+      this.timeoutMs,
+    );
+    if (error) throw error;
   }
 
   async signOut() {

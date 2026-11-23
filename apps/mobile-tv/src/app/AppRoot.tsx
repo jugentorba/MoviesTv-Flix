@@ -209,6 +209,9 @@ function BackendApp({
     updatePassword: auth.updatePassword,
     finishRecovery: auth.finishRecovery,
     passwordRecovery: auth.passwordRecovery,
+    changePassword: auth.changePassword,
+    signOutEverywhere: auth.signOutEverywhere,
+    ...(auth.session?.email ? { email: auth.session.email } : {}),
   }), [
     auth.loading,
     auth.message,
@@ -219,6 +222,9 @@ function BackendApp({
     auth.updatePassword,
     auth.finishRecovery,
     auth.passwordRecovery,
+    auth.changePassword,
+    auth.signOutEverywhere,
+    auth.session?.email,
     onResetBackend,
     userId,
   ]);

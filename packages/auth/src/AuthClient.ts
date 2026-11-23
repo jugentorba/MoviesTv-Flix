@@ -1,5 +1,7 @@
 export interface AuthIdentity {
   userId: string;
+  /** Present when the backend returns it; used only for display. */
+  email?: string;
 }
 
 export interface AuthSession extends AuthIdentity {
@@ -26,6 +28,10 @@ export interface AuthClient {
   updatePassword?(password: string): Promise<void>;
   /** Adopts a session carried by a recovery deep link. */
   restoreFromUrl?(url: string): Promise<AuthIdentity | null>;
+  /** Re-authenticates with the current password, then sets a new one. */
+  changePassword?(currentPassword: string, newPassword: string): Promise<void>;
+  /** Revokes every refresh token for the account, not just this device. */
+  signOutEverywhere?(): Promise<void>;
   subscribe?(
     listener: (identity: AuthIdentity | null, event?: string) => void,
   ): () => void;

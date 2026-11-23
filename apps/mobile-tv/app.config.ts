@@ -1,4 +1,4 @@
-const appVersion = process.env.EXPO_PUBLIC_APP_VERSION?.trim() || '0.7.4';
+const appVersion = process.env.EXPO_PUBLIC_APP_VERSION?.trim() || '0.7.5';
 const parsedBuildNumber = Number.parseInt(
   process.env.EXPO_PUBLIC_BUILD_NUMBER
     ?? process.env.ANDROID_VERSION_CODE

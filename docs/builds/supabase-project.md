@@ -55,6 +55,19 @@ npx supabase@latest db push \
 `/auth/v1/settings` reports `mailer_autoconfirm: true` when confirmation is
 **off**. The flag name is inverted from the dashboard toggle.
 
+## Account security settings
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Minimum password length | **8** | the client enforces 8–72 with at least one letter and one number; 72 is bcrypt's effective limit |
+| Leaked password protection | **on** where the plan allows | rejects passwords seen in breaches (HaveIBeenPwned) |
+| Email rate limits | default | keeps reset/confirmation mail from being used to spam an address |
+| JWT expiry | default (1 h) | refresh tokens rotate through the client library |
+
+The client also re-authenticates with the current password before changing it, so
+an unlocked session alone cannot take over the account, and offers **Sign out
+everywhere**, which revokes all refresh tokens rather than just this device.
+
 ## Account lifecycle in the client
 
 - **Sign-up** calls `signUp` with an `emailRedirectTo`. If Supabase requires
